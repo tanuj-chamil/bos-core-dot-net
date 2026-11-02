@@ -1,0 +1,44 @@
+{
+  "name": "MaterialRequestLine",
+  "description": "Requested item",
+  "accessMode": "operationsOnly",
+  "allowedOperations": [
+    "CreateRequest",
+    "ReviseRequest",
+    "RepriceRequestLine"
+  ],
+  "fields": {
+    "requestId": {
+      "kind": "reference",
+      "targetType": "MaterialRequest",
+      "required": true,
+      "indexed": true
+    },
+    "item": {
+      "kind": "string",
+      "required": true,
+      "maxLength": 200
+    },
+    "quantity": {
+      "kind": "decimal",
+      "precision": 12,
+      "scale": 3,
+      "minimum": "0.001",
+      "required": true
+    },
+    "unitPrice": {
+      "kind": "decimal",
+      "precision": 18,
+      "scale": 2,
+      "minimum": "0.00",
+      "required": true
+    },
+    "amount": {
+      "kind": "decimal",
+      "precision": 18,
+      "scale": 2,
+      "required": true,
+      "default": "0.00"
+    }
+  }
+}

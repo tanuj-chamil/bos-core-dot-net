@@ -1,0 +1,27 @@
+[
+  {
+    "name": "Requester",
+    "grants": [
+      {"action": "record.read", "resource": "MaterialRequest"},
+      {"action": "record.create", "resource": "MaterialRequest"},
+      {"action": "record.update", "resource": "MaterialRequest"},
+      {"action": "record.read", "resource": "MaterialRequestLine"},
+      {"action": "record.create", "resource": "MaterialRequestLine"},
+      {"action": "record.update", "resource": "MaterialRequestLine"},
+      {"action": "operations.execute", "resource": "CreateRequest"},
+      {"action": "operations.execute", "resource": "ReviseRequest"},
+      {"action": "operations.execute", "resource": "RepriceRequestLine"},
+      {"action": "operations.execute", "resource": "FinalizeRequest"},
+      {"action": "flows.read", "resource": "SubmitMaterialRequest"},
+      {"action": "flows.execute", "resource": "SubmitMaterialRequest"}
+    ]
+  },
+  {
+    "name": "Approver",
+    "grants": [
+      {"action": "record.read", "resource": "MaterialRequest"},
+      {"action": "record.update", "resource": "MaterialRequest"},
+      {"action": "operations.execute", "resource": "ApproveRequest"}
+    ]
+  }
+]

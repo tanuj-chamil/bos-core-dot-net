@@ -1,0 +1,16 @@
+{
+  "title": "Pilot material request",
+  "currency": "LKR",
+  "lines": [
+    {
+      "item": "Item A",
+      "quantity": "2.000",
+      "unitPrice": "150.00"
+    },
+    {
+      "item": "Item B",
+      "quantity": "3.000",
+      "unitPrice": "200.00"
+    }
+  ]
+}

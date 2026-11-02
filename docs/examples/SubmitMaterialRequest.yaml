@@ -1,0 +1,86 @@
+format: bos.flow/1.0
+name: SubmitMaterialRequest
+mode: command
+transaction: atomic
+inputSchema:
+  fields:
+    requestId: {kind: string, required: true}
+    revision: {kind: integer, required: true}
+outputSchema:
+  fields:
+    requestId: {kind: string, required: true}
+    total: {kind: decimal, precision: 18, scale: 2, required: true}
+dependencies:
+  types: {MaterialRequest: [1], MaterialRequestLine: [1]}
+  operations:
+    records.get: 1
+    records.list: 1
+    RepriceRequestLine: 1
+    FinalizeRequest: 1
+capabilities:
+  - record.read:MaterialRequest
+  - record.read:MaterialRequestLine
+  - record.update:MaterialRequest
+  - record.update:MaterialRequestLine
+  - operations.execute:RepriceRequestLine
+  - operations.execute:FinalizeRequest
+steps:
+  - id: request
+    call: records.get
+    args:
+      type: {literal: MaterialRequest}
+      id: {path: input.requestId}
+    as: request
+  - id: checkStatus
+    require:
+      fn: equal
+      args: [{path: request.data.status}, {literal: Draft}]
+    code: INVALID_STATE
+    message: Only a draft request can be submitted
+  - id: loadLines
+    call: records.list
+    args:
+      type: {literal: MaterialRequestLine}
+      query:
+        object:
+          where:
+            array:
+              - object:
+                  field: {literal: requestId}
+                  op: {literal: eq}
+                  value: {path: input.requestId}
+          limit: {literal: 100}
+    as: lines
+  - id: bounded
+    require: {fn: isNull, args: [{path: lines.nextCursor}]}
+    code: TOO_MANY_LINES
+    message: This flow accepts at most 100 lines
+  - id: nonempty
+    require:
+      fn: greaterThan
+      args:
+        - {fn: length, args: [{path: lines.items}]}
+        - {integer: "0"}
+    code: EMPTY_REQUEST
+    message: At least one line is required
+  - id: priceLines
+    forEach: {path: lines.items}
+    as: line
+    maxItems: 100
+    steps:
+      - id: priceLine
+        call: RepriceRequestLine
+        args:
+          id: {path: line.id}
+          expectedRevision: {path: line.revision}
+  - id: finalize
+    call: FinalizeRequest
+    args:
+      id: {path: input.requestId}
+      expectedRevision: {path: input.revision}
+    as: final
+  - id: output
+    return:
+      object:
+        requestId: {path: final.id}
+        total: {path: final.data.total}

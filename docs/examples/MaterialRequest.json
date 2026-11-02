@@ -1,0 +1,43 @@
+{
+  "name": "MaterialRequest",
+  "description": "Material requisition",
+  "accessMode": "operationsOnly",
+  "allowedOperations": [
+    "CreateRequest",
+    "ReviseRequest",
+    "FinalizeRequest",
+    "ApproveRequest"
+  ],
+  "fields": {
+    "title": {
+      "kind": "string",
+      "required": true,
+      "maxLength": 200
+    },
+    "status": {
+      "kind": "enum",
+      "values": ["Draft", "Submitted", "Approved"],
+      "required": true,
+      "default": "Draft"
+    },
+    "total": {
+      "kind": "decimal",
+      "precision": 18,
+      "scale": 2,
+      "required": true,
+      "default": "0.00"
+    },
+    "currency": {
+      "kind": "enum",
+      "values": ["LKR", "USD"],
+      "required": true
+    },
+    "contentVersion": {
+      "kind": "integer",
+      "required": true,
+      "minimum": "1",
+      "default": "1",
+      "managedBy": ["CreateRequest", "ReviseRequest"]
+    }
+  }
+}
