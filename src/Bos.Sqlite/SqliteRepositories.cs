@@ -108,6 +108,17 @@ internal sealed class SqliteRecordRepository(SqliteUnitOfWork uow) : IRecordRepo
         catch (SqliteException ex) { throw SqliteErrors.Translate(ex); }
     }
 
+    public async Task<JsonObject?> GetRevisionAsync(string id, int revision, CancellationToken ct = default)
+    {
+        try
+        {
+            using var command = uow.Command("SELECT json FROM RecordHistory WHERE id=$id AND revision=$revision", ("$id", id), ("$revision", revision));
+            var json = await command.ExecuteScalarAsync(ct) as string;
+            return json is null ? null : CanonicalJson.Parse(json)!.AsObject();
+        }
+        catch (SqliteException ex) { throw SqliteErrors.Translate(ex); }
+    }
+
     public async Task<bool> HasIncomingReferencesAsync(string id, CancellationToken ct = default)
     {
         try
@@ -214,6 +225,9 @@ internal sealed class SqliteRecordRepository(SqliteUnitOfWork uow) : IRecordRepo
             case "reference":
                 yield return (value.GetValue<string>(), field["targetType"]!.GetValue<string>(), path);
                 break;
+            case "polymorphicReference":
+                yield return (value["id"]!.GetValue<string>(), value["type"]!.GetValue<string>(), path);
+                break;
             case "object":
                 foreach (var (name, child) in field["fields"]!.AsObject())
                     foreach (var reference in References(child!.AsObject(), value.AsObject()[name], $"{path}.{name}")) yield return reference;
@@ -222,6 +236,15 @@ internal sealed class SqliteRecordRepository(SqliteUnitOfWork uow) : IRecordRepo
                 var values = value.AsArray();
                 for (var i = 0; i < values.Count; i++)
                     foreach (var reference in References(field["items"]!.AsObject(), values[i], $"{path}[{i}]")) yield return reference;
+                break;
+            case "map":
+                foreach (var (name, item) in value.AsObject())
+                    foreach (var reference in References(field["values"]!.AsObject(), item, $"{path}[{CanonicalJson.Serialize(JsonValue.Create(name))}]")) yield return reference;
+                break;
+            case "taggedUnion":
+                var tagged = value.AsObject();
+                var tag = tagged["tag"]!.GetValue<string>();
+                foreach (var reference in References(field["variants"]![tag]!.AsObject(), tagged["value"], $"{path}.value")) yield return reference;
                 break;
         }
     }

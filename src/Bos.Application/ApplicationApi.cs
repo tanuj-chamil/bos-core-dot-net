@@ -7,7 +7,7 @@ using Bos.Core;
 namespace Bos.Application;
 
 /// <summary>The only business entry point. Nested calls reuse the root transaction and authorization snapshot.</summary>
-public sealed class ApplicationApi : IApplicationApi, IDispatcher
+public sealed class ApplicationApi : IApplicationApi, IDispatcher, IAttachmentApi
 {
     private readonly IUnitOfWorkFactory factory;
     private readonly IAuthorization authorization;
@@ -19,6 +19,7 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
     private readonly IClock clock;
     private readonly IIdGenerator ids;
     private readonly RecordService records;
+    private readonly AttachmentService attachments;
     public string WorkspaceTimezone { get; set; } = "Asia/Colombo";
     public IReadOnlyList<MethodDescriptor> Methods => MethodCatalogue.All;
 
@@ -28,7 +29,14 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
         this.factory = factory; this.authorization = authorization; this.identity = identity; this.queries = queries;
         this.registry = registry; this.compiler = compiler; this.runner = runner; this.clock = clock; this.ids = ids;
         records = new(authorization, queries, clock, ids);
+        attachments = new(factory, authorization, clock, ids);
     }
+
+    public Task<JsonObject> UploadAttachmentAsync(string fileName, string contentType, byte[] content, Caller caller, string key, CancellationToken ct = default) =>
+        attachments.UploadAsync(fileName, contentType, content, caller, key, WorkspaceTimezone, ct);
+
+    public Task<AttachmentDownload> DownloadAttachmentAsync(string id, Caller caller, CancellationToken ct = default) =>
+        attachments.DownloadAsync(id, caller, WorkspaceTimezone, ct);
 
     public async Task<ApiResult> InvokeAsync(string method, JsonObject args, Caller caller, string? key, CancellationToken ct = default)
     {
@@ -149,6 +157,7 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
     private async Task<JsonNode?> ExecuteAsync(string method, JsonObject args, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
     {
         if (method.StartsWith("records.", StringComparison.Ordinal)) return await CallAsync(method, 1, args, context, uow, ct);
+        if (method.StartsWith("attachments.", StringComparison.Ordinal)) return await attachments.InvokeAsync(method, args, context, uow, ct);
         if (method.StartsWith("types.", StringComparison.Ordinal)) return await TypesAsync(method, args, context, uow, ct);
         if (method.StartsWith("flows.", StringComparison.Ordinal)) return await FlowsAsync(method, args, context, uow, ct);
         if (method.StartsWith("operations.", StringComparison.Ordinal)) return await OperationsAsync(method, args, context, uow, ct);
@@ -180,7 +189,8 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
                     ["expressionDepth"] = 16, ["evaluatedNodes"] = 10000, ["loopItems"] = 100, ["sdkCalls"] = 200,
                     ["mutations"] = 250, ["returnedRecords"] = 1000, ["queryPage"] = 200, ["queryFilters"] = 10,
                     ["queryInItems"] = 50, ["queryVmInstructions"] = 1000000, ["executionMilliseconds"] = 2000,
-                    ["queryMilliseconds"] = 1000, ["outputBytes"] = 65536, ["diagnosticBytes"] = 16384
+                    ["queryMilliseconds"] = 1000, ["outputBytes"] = 65536, ["diagnosticBytes"] = 16384,
+                    ["attachmentBytes"] = AttachmentService.MaximumBytes, ["recordAttachments"] = 100
                 }
             };
         }
@@ -420,13 +430,20 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
         if (method.StartsWith("records.", StringComparison.Ordinal))
         {
             var type = JsonArgs.Name(JsonArgs.String(args, "type"));
-            if (method == "records.get") { if (!authorization.Can(context, "record.read", type)) throw new BosException("NOT_FOUND", "Record not found.", 404); return; }
+            if (method is "records.get" or "records.getRevision" or "records.getHistory") { if (!authorization.Can(context, "record.read", type)) throw new BosException("NOT_FOUND", "Record not found.", 404); return; }
             authorization.Require(context, "record.read", type);
             if (method == "records.validate")
             {
                 if (!authorization.Can(context, "record.create", type) && !authorization.Can(context, "record.update", type)) throw new BosException("FORBIDDEN", "Validation requires create or update permission.", 403);
             }
             else if (method is "records.create" or "records.update" or "records.delete") authorization.Require(context, "record." + method[8..], type);
+            return;
+        }
+        if (method.StartsWith("attachments.", StringComparison.Ordinal))
+        {
+            var type = JsonArgs.Name(JsonArgs.String(args, "type"));
+            if (!authorization.Can(context, "record.read", type)) throw new BosException("NOT_FOUND", "Record not found.", 404);
+            if (method is "attachments.link" or "attachments.remove" && !authorization.Can(context, "record.update", type)) throw new BosException("NOT_FOUND", "Record not found.", 404);
             return;
         }
         if (method.StartsWith("flows.", StringComparison.Ordinal))
@@ -466,6 +483,12 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
         if (method.Name is "identity.getCurrent" or "authorization.can" or "system.getCapabilities") return true;
         if (method.Name.StartsWith("operations.", StringComparison.Ordinal)) return registry.Descriptors.Any(d => CanExecute(d, context));
         if (method.Name.StartsWith("records.", StringComparison.Ordinal)) return CanExecute(registry.Resolve(method.Name, 1).Descriptor, context);
+        if (method.Name.StartsWith("attachments.", StringComparison.Ordinal))
+        {
+            var action = method.Name is "attachments.link" or "attachments.remove" ? "record.update" : "record.read";
+            return context.Grants.Select(g => g.Resource).Distinct(StringComparer.Ordinal)
+                .Any(resource => authorization.Can(context, "record.read", resource) && authorization.Can(context, action, resource));
+        }
         if (method.Name is "types.get" or "types.list" or "types.listVersions")
             return HasAny("types.read") || HasAny("record.read");
         if (method.Name is "flows.get" or "flows.list" or "flows.listVersions")
@@ -496,14 +519,21 @@ public sealed class ApplicationApi : IApplicationApi, IDispatcher
             foreach (var field in fields.Select(x => x.Value!.AsObject()))
             {
                 if (field["managedBy"] is JsonArray managed) foreach (var operation in managed) registry.Resolve(operation!.GetValue<string>());
-                if (field["kind"]?.GetValue<string>() == "reference")
+                var kind = field["kind"]?.GetValue<string>();
+                if (kind is "reference" or "versionedReference")
                 {
                     var target = JsonArgs.String(field, "targetType");
                     if (target != JsonArgs.String(definition, "name") && await uow.Documents.GetAsync("typeActive", target, ct) is null)
                         throw new BosException("DEPENDENCY_UNAVAILABLE", "Reference target type is not published.", 409);
                 }
+                if (kind == "polymorphicReference")
+                    foreach (var target in field["targetTypes"]!.AsArray().Select(value => value!.GetValue<string>()))
+                        if (target != JsonArgs.String(definition, "name") && await uow.Documents.GetAsync("typeActive", target, ct) is null)
+                            throw new BosException("DEPENDENCY_UNAVAILABLE", "Reference target type is not published.", 409);
                 if (field["fields"] is JsonObject nested) await Fields(nested);
                 if (field["items"] is JsonObject item) await Fields(new JsonObject { ["item"] = item.DeepClone() });
+                if (field["values"] is JsonObject values) await Fields(new JsonObject { ["value"] = values.DeepClone() });
+                if (field["variants"] is JsonObject variants) await Fields(variants);
             }
         }
         await Fields(definition["fields"]!.AsObject());

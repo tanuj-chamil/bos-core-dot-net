@@ -241,6 +241,19 @@ public sealed class StorageTests
         guarded["accessMode"] = "operationsOnly";
         guarded["allowedOperations"] = new JsonArray("CreateNote");
         guarded["fields"]!["details"]!["fields"]!["first"]!["managedBy"] = new JsonArray("SetSecret");
+        guarded["fields"]!["secrets"] = new JsonObject
+        {
+            ["kind"] = "map", ["maxProperties"] = 10,
+            ["values"] = new JsonObject { ["kind"] = "string", ["managedBy"] = new JsonArray("SetSecret") }
+        };
+        guarded["fields"]!["choice"] = new JsonObject
+        {
+            ["kind"] = "taggedUnion", ["variants"] = new JsonObject
+            {
+                ["public"] = new JsonObject { ["kind"] = "string" },
+                ["secret"] = new JsonObject { ["kind"] = "string", ["managedBy"] = new JsonArray("SetSecret") }
+            }
+        };
         await using (var write = await db.Factory.BeginWriteAsync()) { await PublishAsync(write, guarded); await write.CommitAsync(); }
         var args = new JsonObject { ["type"] = "Note", ["data"] = new JsonObject { ["code"] = "A" } };
         await using (var write = await db.Factory.BeginWriteAsync())
@@ -250,6 +263,18 @@ public sealed class StorageTests
             var context = Context(); context.GuardOwner = "CreateNote";
             args["data"]!["details"] = new JsonObject { ["first"] = "secret" };
             Assert.Equal("POLICY_VIOLATION", (await Assert.ThrowsAsync<BosException>(() => Service().InvokeAsync("records.create", args, context, write))).Code);
+        }
+        await using (var write = await db.Factory.BeginWriteAsync())
+        {
+            var context = Context(); context.GuardOwner = "CreateNote";
+            var mapArgs = new JsonObject { ["type"] = "Note", ["data"] = new JsonObject { ["code"] = "B", ["secrets"] = new JsonObject { ["key"] = "secret" } } };
+            Assert.Equal("POLICY_VIOLATION", (await Assert.ThrowsAsync<BosException>(() => Service().InvokeAsync("records.create", mapArgs, context, write))).Code);
+        }
+        await using (var write = await db.Factory.BeginWriteAsync())
+        {
+            var context = Context(); context.GuardOwner = "CreateNote";
+            var unionArgs = new JsonObject { ["type"] = "Note", ["data"] = new JsonObject { ["code"] = "C", ["choice"] = new JsonObject { ["tag"] = "secret", ["value"] = "secret" } } };
+            Assert.Equal("POLICY_VIOLATION", (await Assert.ThrowsAsync<BosException>(() => Service().InvokeAsync("records.create", unionArgs, context, write))).Code);
         }
     }
 
@@ -338,6 +363,38 @@ public sealed class StorageTests
         await using var read = await db.Factory.BeginReadAsync();
         Assert.True((await read.Records.GetAsync(sourceId))!["deleted"]!.GetValue<bool>());
         Assert.Equal("NOT_FOUND", (await Assert.ThrowsAsync<BosException>(() => service.InvokeAsync("records.get", new JsonObject { ["type"] = "Note", ["id"] = sourceId }, Context(), read))).Code);
+    }
+
+    [Fact]
+    public async Task Nested_map_reference_paths_are_unambiguous_for_keys_containing_dots()
+    {
+        await using var db = await Database.CreateAsync();
+        var definition = Definition();
+        definition["fields"]!["links"] = new JsonObject
+        {
+            ["kind"] = "map", ["maxProperties"] = 10,
+            ["values"] = new JsonObject
+            {
+                ["kind"] = "map", ["maxProperties"] = 10,
+                ["values"] = new JsonObject { ["kind"] = "reference", ["targetType"] = "Note" }
+            }
+        };
+        await using var write = await db.Factory.BeginWriteAsync();
+        await PublishAsync(write, definition);
+        var service = Service();
+        var context = Context();
+        var first = (await service.InvokeAsync("records.create", CreateArgs("first"), context, write))!;
+        var second = (await service.InvokeAsync("records.create", CreateArgs("second"), context, write))!;
+        var holderArgs = CreateArgs("holder");
+        holderArgs["data"]!["links"] = new JsonObject
+        {
+            ["a.b"] = new JsonObject { ["c"] = first["id"]!.DeepClone() },
+            ["a"] = new JsonObject { ["b.c"] = second["id"]!.DeepClone() }
+        };
+        await service.InvokeAsync("records.create", holderArgs, context, write);
+        Assert.Equal(2L, await ScalarAsync(write, "SELECT COUNT(*) FROM RecordReferences"));
+        var expected = string.Join('|', new[] { "links[\"a.b\"][\"c\"]", "links[\"a\"][\"b.c\"]" }.Order(StringComparer.Ordinal));
+        Assert.Equal(expected, await ScalarAsync(write, "SELECT group_concat(path,'|') FROM (SELECT path FROM RecordReferences ORDER BY path COLLATE BINARY)"));
     }
 
     [Fact]
@@ -679,12 +736,12 @@ public sealed class StorageTests
     }
 
     [Fact]
-    public async Task Initialize_stamps_schema_one_and_is_idempotent_without_changing_documents_or_audit()
+    public async Task Initialize_stamps_schema_two_and_is_idempotent_without_changing_documents_or_audit()
     {
         await using var db = await Database.CreateAsync();
         await using (var writer = await db.Factory.BeginWriteAsync())
         {
-            Assert.Equal(1L, await ScalarAsync(writer, "PRAGMA user_version"));
+            Assert.Equal(2L, await ScalarAsync(writer, "PRAGMA user_version"));
             await writer.Documents.PutAsync("test", "marker", new JsonObject { ["value"] = "retained" });
             await writer.Documents.AppendAuditAsync(new JsonObject { ["method"] = "test.marker" });
             await writer.CommitAsync();
@@ -692,7 +749,7 @@ public sealed class StorageTests
         await db.Factory.InitializeAsync();
         await db.Factory.InitializeAsync();
         await using var reader = await db.Factory.BeginReadAsync();
-        Assert.Equal(1L, await ScalarAsync(reader, "PRAGMA user_version"));
+        Assert.Equal(2L, await ScalarAsync(reader, "PRAGMA user_version"));
         Assert.Equal("retained", (await reader.Documents.GetAsync("test", "marker"))!["value"]!.GetValue<string>());
         Assert.Equal(1L, await ScalarAsync(reader, "SELECT COUNT(*) FROM Audit"));
         Assert.Equal("ok", await ScalarAsync(reader, "PRAGMA integrity_check"));
@@ -715,17 +772,82 @@ public sealed class StorageTests
         }
         await db.Factory.InitializeAsync();
         await using var reader = await db.Factory.BeginReadAsync();
-        Assert.Equal(1L, await ScalarAsync(reader, "PRAGMA user_version"));
+        Assert.Equal(2L, await ScalarAsync(reader, "PRAGMA user_version"));
         Assert.Equal("retained", (await reader.Documents.GetAsync("test", "preview"))!["value"]!.GetValue<string>());
         Assert.Equal(0L, await ScalarAsync(reader, "SELECT COUNT(*) FROM Records"));
         Assert.Equal(0L, await ScalarAsync(reader, "SELECT COUNT(*) FROM Audit"));
     }
 
+    [Fact]
+    public async Task Initialize_upgrades_schema_one_with_attachment_storage_without_changing_business_data()
+    {
+        await using var db = await Database.CreateAsync();
+        await using (var writer = await db.Factory.BeginWriteAsync())
+        {
+            await writer.Documents.PutAsync("test", "retained", new JsonObject { ["value"] = "business data" });
+            await writer.CommitAsync();
+        }
+        await using (var downgrade = RawStorageConnection(db.Factory.DatabasePath))
+        {
+            await downgrade.OpenAsync();
+            using var command = downgrade.CreateCommand();
+            command.CommandText = "DROP TABLE Attachments; PRAGMA user_version=1;";
+            await command.ExecuteNonQueryAsync();
+        }
+        await db.Factory.InitializeAsync();
+        await using var reader = await db.Factory.BeginReadAsync();
+        Assert.Equal(2L, await ScalarAsync(reader, "PRAGMA user_version"));
+        Assert.Equal("business data", (await reader.Documents.GetAsync("test", "retained"))!["value"]!.GetValue<string>());
+        Assert.Equal(1L, await ScalarAsync(reader, "SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='Attachments'"));
+        Assert.Equal("ok", await ScalarAsync(reader, "PRAGMA integrity_check"));
+    }
+
+    [Fact]
+    public async Task Expired_pending_attachments_are_deleted_with_their_content()
+    {
+        await using var db = await Database.CreateAsync();
+        var id = Guid.NewGuid().ToString("D");
+        await using (var writer = await db.Factory.BeginWriteAsync())
+        {
+            var metadata = new JsonObject
+            {
+                ["id"] = id, ["type"] = null, ["recordId"] = null, ["state"] = "pending", ["revision"] = 1,
+                ["deleted"] = false, ["ownerId"] = "owner", ["expiresAt"] = "2026-01-01T00:00:00.000Z"
+            };
+            await writer.Attachments.InsertAsync(metadata, "private bytes"u8.ToArray(), "pending-cleanup-key", "input-hash");
+            await writer.CommitAsync();
+        }
+        await using (var writer = await db.Factory.BeginWriteAsync())
+        {
+            await writer.Attachments.CleanupExpiredPendingAsync("2026-01-02T00:00:00.000Z");
+            await writer.CommitAsync();
+        }
+        await using var reader = await db.Factory.BeginReadAsync();
+        Assert.Null(await reader.Attachments.GetAsync(id));
+        Assert.Null(await reader.Attachments.GetContentAsync(id));
+        Assert.Equal(0L, await ScalarAsync(reader, "SELECT COUNT(*) FROM Attachments"));
+    }
+
+    [Fact]
+    public async Task Backup_database_validation_rejects_schema_two_without_attachment_storage()
+    {
+        await using var db = await Database.CreateAsync();
+        await using (var connection = RawStorageConnection(db.Factory.DatabasePath))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "DROP TABLE Attachments";
+            await command.ExecuteNonQueryAsync();
+        }
+        var error = await Assert.ThrowsAsync<BosException>(() => SqliteBackupAdapter.CheckDatabaseAsync(db.Factory.DatabasePath));
+        Assert.Equal("INVALID_BACKUP", error.Code);
+    }
+
     [Theory]
-    [InlineData(2, false)]
+    [InlineData(3, false)]
     [InlineData(int.MaxValue, false)]
     [InlineData(-1, false)]
-    [InlineData(2, true)]
+    [InlineData(3, true)]
     [InlineData(-1, true)]
     public async Task Unsupported_schema_is_refused_by_initialize_and_every_begin_without_changing_any_file(int version, bool wal)
     {
@@ -775,7 +897,7 @@ public sealed class StorageTests
         await change.OpenAsync();
         using (var command = change.CreateCommand())
         {
-            command.CommandText = "PRAGMA user_version=2";
+            command.CommandText = "PRAGMA user_version=3";
             await command.ExecuteNonQueryAsync();
         }
         if (keepWalOpen) Assert.True(File.Exists(db.Factory.DatabasePath + "-wal"));
@@ -815,7 +937,7 @@ public sealed class StorageTests
         }
         await db.Factory.InitializeAsync();
         await using var reader = await db.Factory.BeginReadAsync();
-        Assert.Equal(1L, await ScalarAsync(reader, "PRAGMA user_version"));
+        Assert.Equal(2L, await ScalarAsync(reader, "PRAGMA user_version"));
         Assert.Equal("original", await ScalarAsync(reader, "SELECT value FROM Sentinel"));
         Assert.Equal(0L, await ScalarAsync(reader, "SELECT COUNT(*) FROM Records"));
         Assert.Equal("ok", await ScalarAsync(reader, "PRAGMA integrity_check"));

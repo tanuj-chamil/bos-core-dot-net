@@ -275,6 +275,189 @@ public sealed class ValuesTests
         Assert.False(Schema.ValidateData(schema, Obj("""{"ref":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26"}""")).Valid);
     }
 
+    public static IEnumerable<object[]> StringFormatCases()
+    {
+        yield return ["email", "person@example.com", "person@example.com", "person@localhost"];
+        yield return ["phone", "+14155552671", "+14155552671", "14155552671"];
+        yield return ["url", "https://example.com/a", "https://example.com/a", "https://user@example.com"];
+        yield return ["uuid", "A4D7B42D-A26B-4F47-A890-1A3C3889FC26", "a4d7b42d-a26b-4f47-a890-1a3c3889fc26", "not-a-uuid"];
+        yield return ["uri", "mailto:person@example.com", "mailto:person@example.com", "relative/path"];
+        yield return ["slug", "lower-case-1", "lower-case-1", "Upper"];
+        yield return ["ipAddress", "2001:db8::1", "2001:db8::1", "999.1.1.1"];
+        yield return ["hostname", "api.example.com", "api.example.com", "-api.example.com"];
+        yield return ["countryCode", "us", "US", "USA"];
+        yield return ["currencyCode", "usd", "USD", "US"];
+        yield return ["locale", "en-US", "en-US", "not_a_locale"];
+        yield return ["timeZone", "Etc/UTC", "Etc/UTC", "Not/AZone"];
+    }
+
+    [Theory]
+    [MemberData(nameof(StringFormatCases))]
+    public void String_formats_validate_and_only_documented_formats_canonicalize(string format, string input, string expected, string invalid)
+    {
+        var schema = new JsonObject { ["fields"] = new JsonObject { ["v"] = new JsonObject { ["kind"] = "string", ["minLength"] = 1, ["maxLength"] = 255, ["format"] = format } } };
+        Assert.Equal(expected, Schema.Normalize(schema, new JsonObject { ["v"] = input })["v"]!.GetValue<string>());
+        Assert.False(Schema.ValidateData(schema, new JsonObject { ["v"] = invalid }).Valid);
+    }
+
+    [Fact]
+    public void String_patterns_are_bounded_safe_and_applied_after_normalization()
+    {
+        var schema = Obj("""{"fields":{"v":{"kind":"string","minLength":2,"maxLength":3,"pattern":"^[A-Z]+$"}}}""");
+        Assert.True(Schema.ValidateData(schema, Obj("""{"v":"AB"}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"v":"A"}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"v":"Ab"}""")).Valid);
+        Assert.False(Schema.ValidateDefinition(Obj("""{"fields":{"v":{"kind":"string","pattern":"^(a)\\1$"}}}"""), true).Valid);
+        var longPattern = new string('a', 257);
+        Assert.False(Schema.ValidateDefinition(new JsonObject { ["fields"] = new JsonObject { ["v"] = new JsonObject { ["kind"] = "string", ["pattern"] = longPattern } } }, true).Valid);
+    }
+
+    [Fact]
+    public void Exclusive_bounds_and_multiple_of_use_exact_arithmetic()
+    {
+        var schema = Obj("""{"fields":{"i":{"kind":"integer","exclusiveMinimum":"0","exclusiveMaximum":"10","multipleOf":"3"},"d":{"kind":"decimal","precision":8,"scale":3,"minimum":"0.001","maximum":"9.999","multipleOf":"0.125"}}}""");
+        var normalized = Schema.Normalize(schema, Obj("""{"i":"+0009","d":"1.250"}"""));
+        Assert.Equal("9", normalized["i"]!.GetValue<string>());
+        Assert.Equal("1.250", normalized["d"]!.GetValue<string>());
+        foreach (var invalid in new[] { "0", "10", "4" }) Assert.False(Schema.ValidateData(schema, new JsonObject { ["i"] = invalid, ["d"] = "1.250" }).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"i":"3","d":"1.251"}""")).Valid);
+        Assert.False(Schema.ValidateDefinition(Obj("""{"fields":{"v":{"kind":"integer","minimum":"0","exclusiveMinimum":"0"}}}"""), true).Valid);
+        Assert.False(Schema.ValidateDefinition(Obj("""{"fields":{"v":{"kind":"integer","multipleOf":"0"}}}"""), true).Valid);
+    }
+
+    public static IEnumerable<object[]> TemporalCases()
+    {
+        yield return ["time", "12:03:04.5", "12:03:04.500", "24:00:00"];
+        yield return ["localDateTime", "2024-02-29T12:03:04.12", "2024-02-29T12:03:04.120", "2023-02-29T12:03:04"];
+        yield return ["duration", "P1DT25H2M3.4S", "P2DT1H2M3.4S", "P1Y"];
+        yield return ["calendarPeriod", "P01Y02M00D", "P1Y2M", "P1Y1H"];
+        yield return ["offsetDateTime", "2024-02-29T12:03:04Z", "2024-02-29T12:03:04.000+00:00", "2024-02-29T12:03:04"];
+    }
+
+    [Theory]
+    [MemberData(nameof(TemporalCases))]
+    public void New_temporal_scalars_have_invariant_millisecond_canonical_forms(string kind, string input, string expected, string invalid)
+    {
+        var schema = new JsonObject { ["name"] = "Thing", ["fields"] = new JsonObject { ["v"] = new JsonObject { ["kind"] = kind, ["indexed"] = true } } };
+        Assert.Equal(expected, Schema.Normalize(schema, new JsonObject { ["v"] = input })["v"]!.GetValue<string>());
+        Assert.False(Schema.ValidateData(schema, new JsonObject { ["v"] = invalid }).Valid);
+        Assert.Equal(expected, TypedIndex.Canonical(kind, JsonValue.Create(input)!));
+    }
+
+    [Fact]
+    public void Arrays_maps_and_tagged_unions_normalize_recursively_and_enforce_structure()
+    {
+        var schema = Obj("""
+        {"name":"Thing","fields":{
+            "items":{"kind":"array","minItems":1,"maxItems":3,"uniqueItems":true,"items":{"kind":"string"}},
+            "map":{"kind":"map","minProperties":1,"maxProperties":2,"maxKeyLength":3,"keyPattern":"^[a-z]+$","values":{"kind":"integer"}},
+            "choice":{"kind":"taggedUnion","variants":{"Text":{"kind":"string"},"Count":{"kind":"integer"}}}
+        }}
+        """);
+        var normalized = Schema.Normalize(schema, Obj("""{"items":["e\u0301"],"map":{"a":"+01"},"choice":{"tag":"Count","value":"+02"}}"""));
+        Assert.Equal("é", normalized["items"]![0]!.GetValue<string>());
+        Assert.Equal("1", normalized["map"]!["a"]!.GetValue<string>());
+        Assert.Equal("2", normalized["choice"]!["value"]!.GetValue<string>());
+        Assert.False(Schema.ValidateData(schema, Obj("""{"items":["é","e\u0301"],"map":{"a":"1"},"choice":{"tag":"Text","value":"ok"}}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"items":["x"],"map":{"TOOLONG":"1"},"choice":{"tag":"Other","value":"x"}}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"items":["x"],"map":{"a":"1"},"choice":{"tag":"Text","value":"x","extra":true}}""")).Valid);
+    }
+
+    [Fact]
+    public void Business_values_are_exact_bounded_and_canonical()
+    {
+        var schema = Obj("""
+        {"name":"Thing","fields":{
+            "money":{"kind":"money","precision":8,"scale":2,"minimum":"0","currencies":["USD","EUR"]},
+            "percentage":{"kind":"percentage","precision":5,"scale":2,"indexed":true},
+            "quantity":{"kind":"quantity","precision":8,"scale":3,"minimum":"0","units":["kg","lb"]},
+            "point":{"kind":"geopoint"},
+            "dates":{"kind":"dateRange"},
+            "instants":{"kind":"instantRange"}
+        }}
+        """);
+        var value = Obj("""{"money":{"amount":"1.2","currency":"usd"},"percentage":"12.5","quantity":{"value":"2","unit":"kg"},"point":{"latitude":"1.2","longitude":"-2.3"},"dates":{"start":"2024-01-01","end":"2024-01-02"},"instants":{"start":"2024-01-01T01:00:00+01:00","end":"2024-01-01T00:00:01Z"}}""");
+        var normalized = Schema.Normalize(schema, value);
+        Assert.Equal("1.20", normalized["money"]!["amount"]!.GetValue<string>()); Assert.Equal("USD", normalized["money"]!["currency"]!.GetValue<string>());
+        Assert.Equal("12.50", normalized["percentage"]!.GetValue<string>()); Assert.Equal("2.000", normalized["quantity"]!["value"]!.GetValue<string>());
+        Assert.Equal("1.200000", normalized["point"]!["latitude"]!.GetValue<string>());
+        Assert.Equal(TypedIndex.Key("decimal", JsonValue.Create("12.50")!), TypedIndex.Key("percentage", normalized["percentage"]!));
+        Assert.False(Schema.ValidateData(schema, Obj("""{"percentage":"100.01"}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"money":{"amount":"1","currency":"JPY"}}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"point":{"latitude":"90.000001","longitude":"0"}}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"dates":{"start":"2024-01-02","end":"2024-01-01"}}""")).Valid);
+    }
+
+    [Fact]
+    public void Multi_enums_and_new_references_use_exact_wire_forms()
+    {
+        const string id = "a4d7b42d-a26b-4f47-a890-1a3c3889fc26";
+        var schema = Obj("""
+        {"fields":{
+            "set":{"kind":"multiEnum","values":["B","A","C"],"minItems":1,"maxItems":2},
+            "poly":{"kind":"polymorphicReference","targetTypes":["Thing","Other"]},
+            "versioned":{"kind":"versionedReference","targetType":"Thing"},
+            "user":{"kind":"userReference"},"file":{"kind":"attachment"}
+        }}
+        """);
+        var normalized = Schema.Normalize(schema, Obj("""{"set":["B","A"],"poly":{"type":"Thing","id":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26"},"versioned":{"id":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26","revision":2},"user":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26","file":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26"}"""));
+        Assert.Equal(new[] { "A", "B" }, normalized["set"]!.AsArray().Select(x => x!.GetValue<string>()));
+        Assert.Equal(id, normalized["poly"]!["id"]!.GetValue<string>()); Assert.Equal(id, normalized["versioned"]!["id"]!.GetValue<string>());
+        Assert.Equal(id, normalized["user"]!.GetValue<string>()); Assert.Equal(id, normalized["file"]!.GetValue<string>());
+        Assert.False(Schema.ValidateData(schema, Obj("""{"set":["A","A"]}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"poly":{"type":"Missing","id":"a4d7b42d-a26b-4f47-a890-1a3c3889fc26"}}""")).Valid);
+        Assert.False(Schema.ValidateData(schema, Obj("""{"versioned":{"id":"a4d7b42d-a26b-4f47-a890-1a3c3889fc26","revision":"2"}}""")).Valid);
+    }
+
+    [Theory]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"string\",\"format\":\"unknown\"}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"string\",\"minLength\":2,\"maxLength\":1}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"array\",\"minItems\":2,\"maxItems\":1,\"items\":{\"kind\":\"string\"}}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"map\",\"values\":{\"kind\":\"string\"}}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"taggedUnion\",\"variants\":{}}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"money\",\"precision\":8,\"scale\":2,\"currencies\":[]}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"percentage\",\"precision\":5}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"quantity\",\"precision\":8,\"scale\":2,\"units\":[]}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"multiEnum\",\"values\":[\"A\",\"A\"],\"maxItems\":2}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"polymorphicReference\",\"targetTypes\":[\"Thing\",\"Thing\"]}}}")]
+    [InlineData("{\"fields\":{\"v\":{\"kind\":\"versionedReference\"}}}")]
+    public void Extended_field_definitions_are_closed_and_bounded(string definition)
+        => Assert.False(Schema.ValidateDefinition(Obj(definition), true).Valid);
+
+    [Fact]
+    public void Extended_defaults_use_the_same_recursive_canonicalization()
+    {
+        var schema = Obj("""
+        {"fields":{
+            "map":{"kind":"map","maxProperties":2,"values":{"kind":"integer"},"default":{"a":"+01"}},
+            "choice":{"kind":"taggedUnion","variants":{"Count":{"kind":"integer"}},"default":{"tag":"Count","value":"+02"}},
+            "set":{"kind":"multiEnum","values":["B","A"],"maxItems":2,"default":["B","A"]},
+            "versioned":{"kind":"versionedReference","targetType":"Thing","default":{"id":"A4D7B42D-A26B-4F47-A890-1A3C3889FC26","revision":1}}
+        }}
+        """);
+        Assert.True(Schema.ValidateDefinition(schema, true).Valid);
+        var normalized = Schema.Normalize(schema, new JsonObject());
+        Assert.Equal("1", normalized["map"]!["a"]!.GetValue<string>());
+        Assert.Equal("2", normalized["choice"]!["value"]!.GetValue<string>());
+        Assert.Equal(new[] { "A", "B" }, normalized["set"]!.AsArray().Select(x => x!.GetValue<string>()));
+        Assert.Equal("a4d7b42d-a26b-4f47-a890-1a3c3889fc26", normalized["versioned"]!["id"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("map", "\"values\":{\"kind\":\"string\"},\"maxProperties\":2")]
+    [InlineData("taggedUnion", "\"variants\":{\"A\":{\"kind\":\"string\"}}")]
+    [InlineData("money", "\"precision\":8,\"scale\":2")]
+    [InlineData("multiEnum", "\"values\":[\"A\"],\"maxItems\":1")]
+    [InlineData("polymorphicReference", "\"targetTypes\":[\"Thing\"]")]
+    [InlineData("versionedReference", "\"targetType\":\"Thing\"")]
+    [InlineData("userReference", "")]
+    [InlineData("attachment", "")]
+    public void Composite_and_new_reference_kinds_reject_indexes(string kind, string properties)
+    {
+        var separator = properties.Length == 0 ? "" : "," + properties;
+        Assert.False(Schema.ValidateDefinition(Obj("{\"name\":\"Thing\",\"fields\":{\"v\":{\"kind\":\"" + kind + "\",\"indexed\":true" + separator + "}}}"), false).Valid);
+    }
+
     [Fact]
     public void Numeric_index_keys_sort_by_exact_numeric_value_in_both_directions()
     {
@@ -300,7 +483,7 @@ public sealed class ValuesTests
     [Fact]
     public void Evolution_allows_only_safe_additions_and_nonindexed_relaxation()
     {
-        var old = Obj("""{"name":"Thing","fields":{"v":{"kind":"integer","minimum":"1","maximum":"10","required":true},"choice":{"kind":"enum","values":["One"],"indexed":true}}}""");
+        var old = Obj("""{"name":"Thing","fields":{"v":{"kind":"integer","minimum":"1","maximum":"10","required":true},"choice":{"kind":"enum","values":["One"]}}}""");
         var next = (JsonObject)old.DeepClone();
         next["fields"]!["v"]!["minimum"] = "0";
         next["fields"]!["v"]!["maximum"] = "11";
@@ -311,6 +494,32 @@ public sealed class ValuesTests
         Schema.CheckEvolution(old, next);
         Assert.Throws<BosException>(() => Schema.CheckEvolution(next, old));
         next["fields"]!["extra"]!["required"] = true;
+        Assert.Throws<BosException>(() => Schema.CheckEvolution(old, next));
+    }
+
+    [Fact]
+    public void Evolution_relaxes_new_constraints_but_keeps_indexes_and_representations_immutable()
+    {
+        var old = Obj("""
+        {"name":"Thing","fields":{
+            "text":{"kind":"string","minLength":2,"maxLength":10,"format":"slug","pattern":"^[a-z-]+$"},
+            "number":{"kind":"decimal","precision":8,"scale":2,"exclusiveMinimum":"0","maximum":"10","multipleOf":"0.50"},
+            "list":{"kind":"array","minItems":1,"maxItems":2,"uniqueItems":true,"items":{"kind":"string","minLength":2}},
+            "map":{"kind":"map","minProperties":1,"maxProperties":2,"values":{"kind":"enum","values":["A"]}},
+            "union":{"kind":"taggedUnion","variants":{"A":{"kind":"string"}}},
+            "indexed":{"kind":"string","maxLength":10,"indexed":true}
+        }}
+        """);
+        var next = (JsonObject)old.DeepClone();
+        next["fields"]!["text"]!["minLength"] = 1; next["fields"]!["text"]!["maxLength"] = 20; next["fields"]!["text"]!.AsObject().Remove("format"); next["fields"]!["text"]!.AsObject().Remove("pattern");
+        next["fields"]!["number"]!["exclusiveMinimum"] = "-1"; next["fields"]!["number"]!["maximum"] = "11"; next["fields"]!["number"]!["multipleOf"] = "0.25";
+        next["fields"]!["list"]!["minItems"] = 0; next["fields"]!["list"]!["maxItems"] = 3; next["fields"]!["list"]!["uniqueItems"] = false; next["fields"]!["list"]!["items"]!["minLength"] = 1;
+        next["fields"]!["map"]!["minProperties"] = 0; next["fields"]!["map"]!["maxProperties"] = 3; ((JsonArray)next["fields"]!["map"]!["values"]!["values"]!).Add("B");
+        next["fields"]!["union"]!["variants"]!["B"] = Obj("""{"kind":"integer"}""");
+        Schema.CheckEvolution(old, next);
+        next["fields"]!["indexed"]!["maxLength"] = 11;
+        Assert.Throws<BosException>(() => Schema.CheckEvolution(old, next));
+        next = (JsonObject)old.DeepClone(); next["fields"]!["number"]!["scale"] = 3;
         Assert.Throws<BosException>(() => Schema.CheckEvolution(old, next));
     }
 

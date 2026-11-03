@@ -96,6 +96,13 @@ Cookie-authenticated mutations also require an antiforgery header. Bearer-token 
 
 Discovery is authorization-filtered. An absent method may be unavailable or simply not visible to the current principal.
 
+The OpenAPI document also describes the two binary attachment routes:
+
+- `POST /v1/attachments` uploads one private pending multipart file.
+- `GET /v1/attachments/{id}/content` downloads bytes when the caller can read the owning record, or owns the pending upload.
+
+Attachment metadata operations use the normal method route: `attachments.list`, `attachments.link`, and `attachments.remove`.
+
 ## Health endpoints
 
 - `GET /health/live` reports process liveness.
@@ -115,7 +122,7 @@ Business integers and decimals are canonical JSON strings so clients do not lose
 }
 ```
 
-Dates use `YYYY-MM-DD`. Instants use canonical RFC 3339 timestamps. Unknown arguments and properties fail instead of being ignored.
+Dates use `YYYY-MM-DD`. Instants use canonical RFC 3339 timestamps. Local and offset date-times, times, durations, and calendar periods retain their distinct wire forms rather than being silently converted. Unknown arguments and properties fail instead of being ignored.
 
 ## Run receipts
 

@@ -69,6 +69,25 @@ public sealed class IntegrationTests
         Assert.Equal(before, await DefinitionState(workspace));
     }
 
+    [Fact, Trait("Gate", "A03")]
+    public async Task Publishing_rejects_new_reference_kinds_and_nested_targets_that_are_not_published()
+    {
+        await using var workspace = await CreateAsync();
+        var fields = new JsonObject[]
+        {
+            new() { ["value"] = new JsonObject { ["kind"] = "versionedReference", ["targetType"] = "Missing" } },
+            new() { ["value"] = new JsonObject { ["kind"] = "polymorphicReference", ["targetTypes"] = new JsonArray("Missing") } },
+            new() { ["value"] = new JsonObject { ["kind"] = "map", ["maxProperties"] = 10, ["values"] = new JsonObject { ["kind"] = "reference", ["targetType"] = "Missing" } } },
+            new() { ["value"] = new JsonObject { ["kind"] = "taggedUnion", ["variants"] = new JsonObject { ["missing"] = new JsonObject { ["kind"] = "reference", ["targetType"] = "Missing" } } } }
+        };
+        for (var i = 0; i < fields.Length; i++)
+        {
+            var definition = new JsonObject { ["name"] = "Dependency" + i, ["fields"] = fields[i] };
+            var error = await Assert.ThrowsAsync<BosException>(() => workspace.PublishTypeAsync(definition));
+            Assert.Equal("DEPENDENCY_UNAVAILABLE", error.Code);
+        }
+    }
+
     [Fact, Trait("Gate", "A03"), Trait("Gate", "A06")]
     public async Task Crud_noop_and_stale_preconditions_preserve_history_and_tombstone_data()
     {
@@ -98,6 +117,73 @@ public sealed class IntegrationTests
         Assert.NotNull(tombstone);
         Assert.True(tombstone["deleted"]!.GetValue<bool>());
         Assert.Equal("Changed", Text(tombstone["data"]!, "title"));
+        var original = await workspace.CallAsync("records.getRevision", new JsonObject { ["type"] = "Note", ["id"] = id, ["revision"] = 1 });
+        Assert.Equal("Original", Text(original["data"]!, "title"));
+        var historicalUpdate = await workspace.CallAsync("records.getRevision", new JsonObject { ["type"] = "Note", ["id"] = id, ["revision"] = 2 });
+        Assert.Equal("Changed", Text(historicalUpdate["data"]!, "title"));
+        Assert.False(historicalUpdate["deleted"]!.GetValue<bool>());
+        var firstPage = await workspace.CallAsync("records.getHistory", new JsonObject
+        {
+            ["type"] = "Note", ["id"] = id, ["query"] = new JsonObject { ["limit"] = 2 }
+        });
+        Assert.Equal(new[] { 3, 2 }, firstPage["items"]!.AsArray().Select(item => Number(item!, "revision")));
+        var secondPage = await workspace.CallAsync("records.getHistory", new JsonObject
+        {
+            ["type"] = "Note", ["id"] = id,
+            ["query"] = new JsonObject { ["limit"] = 2, ["cursor"] = firstPage["nextCursor"]!.DeepClone() }
+        });
+        Assert.Equal(1, Number(Assert.Single(secondPage["items"]!.AsArray())!, "revision"));
+        var unreadable = await CreateServiceAsync(workspace.Api, workspace.Identity, workspace.Admin, "HistoryWithoutRead", GrantArray(("record.read", "Other")));
+        foreach (var (method, arguments) in new[]
+        {
+            ("records.getRevision", new JsonObject { ["type"] = "Note", ["id"] = id, ["revision"] = 1 }),
+            ("records.getHistory", new JsonObject { ["type"] = "Note", ["id"] = id, ["query"] = new JsonObject() })
+        })
+            Assert.Equal("NOT_FOUND", (await Assert.ThrowsAsync<BosException>(() => workspace.CallAsync(method, arguments, unreadable.Caller))).Code);
+    }
+
+    [Fact, Trait("Gate", "A03"), Trait("Gate", "A06")]
+    public async Task Polymorphic_versioned_user_map_and_union_references_are_checked_at_the_application_boundary()
+    {
+        await using var workspace = await CreateAsync();
+        await workspace.PublishTypeAsync(Parse("""{"name":"ReferenceTarget","fields":{"name":{"kind":"string","required":true}}}"""));
+        await workspace.PublishTypeAsync(Parse("""
+            {"name":"AdvancedHolder","fields":{
+              "poly":{"kind":"polymorphicReference","targetTypes":["ReferenceTarget"],"required":true},
+              "historical":{"kind":"versionedReference","targetType":"ReferenceTarget","required":true},
+              "user":{"kind":"userReference","required":true},
+              "mapped":{"kind":"map","required":true,"maxProperties":10,"values":{"kind":"reference","targetType":"ReferenceTarget"}},
+              "choice":{"kind":"taggedUnion","required":true,"variants":{"target":{"kind":"reference","targetType":"ReferenceTarget"},"text":{"kind":"string"}}}
+            }}
+            """));
+        var target = await workspace.CreateRecordAsync("ReferenceTarget", Parse("""{"name":"First"}"""));
+        var targetId = Text(target, "id");
+        await workspace.CallAsync("records.update", new JsonObject
+        {
+            ["type"] = "ReferenceTarget", ["id"] = targetId, ["expectedRevision"] = 1,
+            ["patch"] = new JsonObject { ["name"] = "Second" }
+        });
+        JsonObject Data() => new()
+        {
+            ["poly"] = new JsonObject { ["type"] = "ReferenceTarget", ["id"] = targetId },
+            ["historical"] = new JsonObject { ["id"] = targetId, ["revision"] = 1 },
+            ["user"] = workspace.Admin.PrincipalId,
+            ["mapped"] = new JsonObject { ["primary"] = targetId },
+            ["choice"] = new JsonObject { ["tag"] = "target", ["value"] = targetId }
+        };
+        var holder = await workspace.CreateRecordAsync("AdvancedHolder", Data());
+        Assert.Equal(1, Number(holder["data"]!["historical"]!, "revision"));
+
+        async Task Unavailable(Action<JsonObject> mutate)
+        {
+            var data = Data(); mutate(data);
+            var error = await Assert.ThrowsAsync<BosException>(() => workspace.CreateRecordAsync("AdvancedHolder", data));
+            Assert.Contains(error.Details, detail => detail.Code == "INVALID_REQUEST" && detail.Message == "Reference is unavailable.");
+        }
+        await Unavailable(data => data["historical"]!["revision"] = 99);
+        await Unavailable(data => data["user"] = Guid.NewGuid().ToString("D"));
+        await Unavailable(data => data["mapped"]!["primary"] = Guid.NewGuid().ToString("D"));
+        await Unavailable(data => data["choice"]!["value"] = Guid.NewGuid().ToString("D"));
     }
 
     [Fact, Trait("Gate", "A06")]
@@ -536,7 +622,8 @@ public sealed class IntegrationTests
         // expression helpers have their own transports and must not become callable RPC methods.
         var expected = """
             types.create types.update types.validate types.publish types.get types.list types.listVersions types.getDraft
-            records.create records.get records.update records.delete records.validate records.list records.count
+            records.create records.get records.update records.delete records.validate records.list records.count records.getRevision records.getHistory
+            attachments.list attachments.link attachments.remove
             operations.list operations.get operations.validate operations.call
             flows.create flows.update flows.getDraft flows.validate flows.publish flows.get flows.list flows.listVersions
             flows.run flows.getRun flows.listRuns flows.getRunSteps flows.disable flows.enable
@@ -617,7 +704,7 @@ public sealed class IntegrationTests
         var expected = new[]
         {
             "ApproveRequest", "CreateRequest", "FinalizeRequest", "RepriceRequestLine", "ReviseRequest",
-            "records.count", "records.create", "records.delete", "records.get", "records.list", "records.update", "records.validate"
+            "records.count", "records.create", "records.delete", "records.get", "records.getHistory", "records.getRevision", "records.list", "records.update", "records.validate"
         }.Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(expected, operations.Select(operation => Text(operation, "name")));
         foreach (var descriptor in operations)
@@ -627,7 +714,7 @@ public sealed class IntegrationTests
                 ["name"] = Text(descriptor, "name"), ["contractVersion"] = Number(descriptor, "contractVersion")
             });
             AssertJsonEqual(descriptor, fetched);
-            Assert.True(fetched["flowCallable"]!.GetValue<bool>());
+            Assert.Equal(Text(fetched, "name") is not ("records.getHistory" or "records.getRevision"), fetched["flowCallable"]!.GetValue<bool>());
             Assert.IsType<JsonObject>(fetched["inputSchema"]);
             Assert.IsType<JsonObject>(fetched["outputSchema"]);
             Assert.IsType<JsonArray>(fetched["requiredGrants"]);

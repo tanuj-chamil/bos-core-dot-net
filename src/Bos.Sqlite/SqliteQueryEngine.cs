@@ -97,6 +97,47 @@ public sealed class SqliteQueryEngine : IQueryEngine
         return new JsonObject { ["count"] = count.ToString(CultureInfo.InvariantCulture) };
     }
 
+    public async Task<JsonObject> RecordHistoryAsync(IUnitOfWork uow, InvocationContext context, string type,
+        string id, JsonObject query, CancellationToken ct = default)
+    {
+        Only(query, "limit", "cursor");
+        var limit = Limit(query);
+        var sort = new JsonArray(new JsonObject { ["field"] = "revision", ["direction"] = "desc" });
+        var binding = Binding(context, "recordHistory", type + ":" + id, new Where("", new JsonArray()), sort, null, null);
+        var last = DecodeCursor(query, binding);
+        if (last is not null && (last.Count != 1 || last[0] is not JsonValue value || !value.TryGetValue<int>(out var before) || before < 1))
+            throw BadCursor();
+
+        using var command = Command(uow);
+        var predicate = $"h.id={Parameter(command, id)} AND r.type={Parameter(command, type)}";
+        if (last is not null) predicate += $" AND h.revision<{Parameter(command, last[0]!.GetValue<int>())}";
+        command.CommandText = $"SELECT h.json,h.revision FROM RecordHistory h JOIN Records r ON r.id=h.id WHERE {predicate} ORDER BY h.revision DESC LIMIT {Parameter(command, limit + 1)}";
+
+        ReadType(context, type);
+        var items = new JsonArray();
+        JsonArray? next = null;
+        JsonArray? current = null;
+        using var budget = new QueryBudget(command.Connection!, context, ct);
+        try
+        {
+            await using var reader = await command.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                budget.Check();
+                if (items.Count == limit) { next = current; break; }
+                var record = ParseObject(reader.GetString(0));
+                AcceptVersion(context, type, record["typeVersion"]!.GetValue<int>());
+                items.Add(record);
+                current = new JsonArray(reader.GetInt32(1));
+            }
+            budget.Check();
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 9) { throw Interrupted(ct); }
+        catch (SqliteException ex) { throw SqliteErrors.Translate(ex); }
+        context.Budget.ReturnRecords(items.Count);
+        return new JsonObject { ["items"] = items, ["nextCursor"] = next is null ? null : EncodeCursor(next, binding) };
+    }
+
     public async Task<JsonObject> CatalogueAsync(IUnitOfWork uow, InvocationContext context, string collection,
         JsonObject query, string[] allowedFilters, string[] orderFields, Func<JsonObject, bool> visible,
         CancellationToken ct = default)

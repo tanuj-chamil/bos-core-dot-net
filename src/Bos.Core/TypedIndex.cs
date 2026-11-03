@@ -26,7 +26,7 @@ public static class TypedIndex
             foreach (var unit in canonical) key.Append(((int)unit).ToString("X4", CultureInfo.InvariantCulture));
             return key.ToString();
         }
-        if (kind is not ("integer" or "decimal")) return canonical;
+        if (kind is not ("integer" or "decimal" or "percentage")) return canonical;
         var number = ValueCodec.Decimal(canonical);
         var scaled = ValueCodec.Rescale(number.Value, number.Scale, 12);
         if (BigInteger.Abs(scaled) >= Offset) throw ValueCodec.Invalid("Numeric index value exceeds its range.");

@@ -7,7 +7,7 @@ namespace Bos.Sqlite;
 
 public sealed class SqliteUnitOfWorkFactory : IUnitOfWorkFactory, IStorageDiagnostics
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     public string DatabasePath { get; }
     private readonly string connectionString;
     private int activeReaders;
@@ -128,12 +128,22 @@ public sealed class SqliteUnitOfWorkFactory : IUnitOfWorkFactory, IStorageDiagno
                     id TEXT NOT NULL, revision INTEGER NOT NULL, json TEXT NOT NULL CHECK(json_valid(json)),
                     commandId TEXT NOT NULL, runId TEXT,
                     PRIMARY KEY(id,revision), FOREIGN KEY(id) REFERENCES Records(id));
+                CREATE TABLE IF NOT EXISTS Attachments(
+                    id TEXT PRIMARY KEY NOT NULL, recordId TEXT, type TEXT,
+                    revision INTEGER NOT NULL CHECK(revision>0), deleted INTEGER NOT NULL CHECK(deleted IN (0,1)),
+                    state TEXT NOT NULL CHECK(state IN ('pending','linked','deleted')), expiresAt TEXT,
+                    ownerId TEXT NOT NULL, commandKey TEXT NOT NULL, inputHash TEXT NOT NULL,
+                    json TEXT NOT NULL CHECK(json_valid(json)), content BLOB NOT NULL,
+                    FOREIGN KEY(recordId) REFERENCES Records(id), UNIQUE(ownerId,commandKey),
+                    CHECK((state='linked' AND recordId IS NOT NULL AND type IS NOT NULL AND expiresAt IS NULL) OR
+                          (state='pending' AND recordId IS NULL AND type IS NULL AND expiresAt IS NOT NULL) OR state='deleted'));
+                CREATE INDEX IF NOT EXISTS IX_Attachments_Record ON Attachments(recordId,deleted,id);
+                CREATE INDEX IF NOT EXISTS IX_Attachments_Pending ON Attachments(state,expiresAt,ownerId);
                 CREATE TABLE IF NOT EXISTS Audit(
                     sequence INTEGER PRIMARY KEY AUTOINCREMENT, json TEXT NOT NULL CHECK(json_valid(json)));
-                PRAGMA user_version=1;
+                PRAGMA user_version=2;
                 """;
-            // Version 0 is the unreleased first-preview layout. Adoption into schema 1 is not a
-            // historical released-schema migration; all DDL and the version stamp commit together.
+            // Additive DDL upgrades earlier preview stores transactionally; existing business rows are unchanged.
             await command.ExecuteNonQueryAsync(ct);
             await transaction.CommitAsync(ct);
         }
@@ -196,6 +206,7 @@ internal sealed class SqliteUnitOfWork : IUnitOfWork
     public bool IsWrite { get; }
     public IDocumentRepository Documents { get; }
     public IRecordRepository Records { get; }
+    public IAttachmentRepository Attachments { get; }
 
     internal SqliteUnitOfWork(SqliteConnection connection, SqliteTransaction transaction, bool write, Action release)
     {
@@ -205,6 +216,7 @@ internal sealed class SqliteUnitOfWork : IUnitOfWork
         IsWrite = write;
         Documents = new SqliteDocumentRepository(this);
         Records = new SqliteRecordRepository(this);
+        Attachments = new SqliteAttachmentRepository(this);
     }
 
     internal SqliteCommand Command(string sql, params (string Name, object? Value)[] parameters)

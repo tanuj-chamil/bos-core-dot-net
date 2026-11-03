@@ -69,8 +69,22 @@ public interface IUnitOfWork : IAsyncDisposable
     bool IsWrite { get; }
     IDocumentRepository Documents { get; }
     IRecordRepository Records { get; }
+    IAttachmentRepository Attachments => throw new BosException("FEATURE_NOT_AVAILABLE", "Attachments are unavailable.", 404);
     Task CommitAsync(CancellationToken ct = default);
     Task RollbackAsync(CancellationToken ct = default);
+}
+public interface IAttachmentRepository
+{
+    Task<JsonObject?> GetAsync(string id, CancellationToken ct = default);
+    Task<JsonObject?> GetByCommandAsync(string ownerId, string commandKey, CancellationToken ct = default);
+    Task<IReadOnlyList<JsonObject>> ListAsync(string recordId, int limit = 100, CancellationToken ct = default);
+    Task<byte[]?> GetContentAsync(string id, CancellationToken ct = default);
+    Task InsertAsync(JsonObject metadata, byte[] content, string commandKey, string inputHash, CancellationToken ct = default);
+    Task UpdateAsync(JsonObject metadata, int expectedRevision, CancellationToken ct = default);
+    Task<int> CountPendingAsync(string ownerId, CancellationToken ct = default);
+    Task CleanupExpiredPendingAsync(string expiresBefore, CancellationToken ct = default);
+    Task<bool> HasLinkedAsync(string recordId, CancellationToken ct = default);
+    Task<bool> BelongsToRecordAsync(string id, string recordId, CancellationToken ct = default);
 }
 public interface IUnitOfWorkFactory
 {
@@ -95,6 +109,7 @@ public interface IDocumentRepository
 public interface IRecordRepository
 {
     Task<JsonObject?> GetAsync(string id, CancellationToken ct = default);
+    Task<JsonObject?> GetRevisionAsync(string id, int revision, CancellationToken ct = default) => Task.FromResult<JsonObject?>(null);
     Task SaveAsync(JsonObject record, JsonObject definition, InvocationContext context, CancellationToken ct = default);
     Task<bool> HasIncomingReferencesAsync(string id, CancellationToken ct = default);
 }
@@ -104,6 +119,8 @@ public interface IQueryEngine
     Task<JsonObject> CountAsync(IUnitOfWork uow, InvocationContext context, string type, JsonObject definition, JsonObject filter, CancellationToken ct = default);
     Task<JsonObject> CatalogueAsync(IUnitOfWork uow, InvocationContext context, string collection, JsonObject query, string[] allowedFilters, string[] orderFields, Func<JsonObject, bool> visible, CancellationToken ct = default);
     Task<JsonObject> CatalogueValuesAsync(InvocationContext context, string scope, IReadOnlyList<JsonObject> values, JsonObject query, string[] allowedFilters, string[] orderFields, Func<JsonObject, bool> visible, CancellationToken ct = default);
+    Task<JsonObject> RecordHistoryAsync(IUnitOfWork uow, InvocationContext context, string type, string id, JsonObject query, CancellationToken ct = default) =>
+        throw new BosException("FEATURE_NOT_AVAILABLE", "Record history is unavailable.", 404);
 }
 public interface IAuthorization
 {
@@ -132,6 +149,12 @@ public interface IApplicationApi
 {
     IReadOnlyList<MethodDescriptor> Methods { get; }
     Task<ApiResult> InvokeAsync(string method, JsonObject args, Caller caller, string? key, CancellationToken ct = default);
+}
+public sealed record AttachmentDownload(JsonObject Metadata, byte[] Content);
+public interface IAttachmentApi
+{
+    Task<JsonObject> UploadAttachmentAsync(string fileName, string contentType, byte[] content, Caller caller, string key, CancellationToken ct = default);
+    Task<AttachmentDownload> DownloadAttachmentAsync(string id, Caller caller, CancellationToken ct = default);
 }
 public sealed record ApiResult(JsonNode? Result, int Status = 200);
 public sealed record CompiledFlow(JsonObject Ast, string SourceHash, string AstHash);

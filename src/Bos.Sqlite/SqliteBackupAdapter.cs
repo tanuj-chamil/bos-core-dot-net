@@ -267,7 +267,7 @@ public sealed class SqliteBackupAdapter(string dataDirectory) : IBackupAdapter
         if (JsonArgs.String(manifest, "format") != "bos.backup/1" || JsonArgs.Int(manifest, "engineVersion") != 1)
             throw new BosException("DEPENDENCY_UNAVAILABLE", "Backup engine version is not supported.");
         var schemaVersion = JsonArgs.Int(manifest, "schemaVersion");
-        if (schemaVersion is < 0 or > 1) throw new BosException("DEPENDENCY_UNAVAILABLE", "Backup database schema is not supported.");
+        if (schemaVersion is < 0 or > 2) throw new BosException("DEPENDENCY_UNAVAILABLE", "Backup database schema is not supported.");
         var entries = manifest["entries"] as JsonArray ?? throw InvalidBackup();
         if (entries.Count != zip.Entries.Count - 1) throw InvalidBackup();
         var declared = new HashSet<string>(StringComparer.Ordinal);
@@ -353,7 +353,7 @@ public sealed class SqliteBackupAdapter(string dataDirectory) : IBackupAdapter
         using var command = db.CreateCommand();
         command.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(await command.ExecuteScalarAsync(ct));
-        if (version is < 0 or > 1) throw new BosException("DEPENDENCY_UNAVAILABLE", "Database schema is newer than this engine supports.");
+        if (version is < 0 or > 2) throw new BosException("DEPENDENCY_UNAVAILABLE", "Database schema is newer than this engine supports.");
         command.CommandText = "PRAGMA integrity_check";
         using (var reader = await command.ExecuteReaderAsync(ct))
         {
@@ -364,6 +364,11 @@ public sealed class SqliteBackupAdapter(string dataDirectory) : IBackupAdapter
             if (await reader.ReadAsync(ct)) throw InvalidBackup();
         command.CommandText = "SELECT collection,key,json FROM Documents LIMIT 0; SELECT id,type,typeVersion,revision,deleted,json FROM Records LIMIT 0";
         await command.ExecuteNonQueryAsync(ct);
+        if (version >= 2)
+        {
+            command.CommandText = "SELECT id,recordId,type,revision,deleted,state,expiresAt,ownerId,commandKey,inputHash,json,content FROM Attachments LIMIT 0";
+            await command.ExecuteNonQueryAsync(ct);
+        }
         return version;
     }
 

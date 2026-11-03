@@ -10,7 +10,7 @@ public sealed class OperationRegistry : IOperationRegistry
     private readonly Dictionary<(string, int), IOperation> operations = new();
     public OperationRegistry()
     {
-        foreach (var name in new[] { "create", "get", "update", "delete", "validate", "list", "count" })
+        foreach (var name in new[] { "create", "get", "update", "delete", "validate", "list", "count", "getRevision", "getHistory" })
             Register(new RecordOperation(name));
     }
     public IReadOnlyList<OperationDescriptor> Descriptors => operations.Values.Select(x => Clone(x.Descriptor))
@@ -44,24 +44,27 @@ public sealed class OperationRegistry : IOperationRegistry
             get
             {
                 var input = new JsonObject { ["type"] = Text() };
-                if (suffix is "get" or "update" or "delete") input["id"] = Text();
+                if (suffix is "get" or "update" or "delete" or "getRevision" or "getHistory") input["id"] = Text();
                 if (suffix is "update" or "delete") input["expectedRevision"] = Integer();
+                if (suffix == "getRevision") input["revision"] = Integer();
                 if (suffix is "create" or "validate") input["data"] = new JsonObject();
                 if (suffix == "update") input["patch"] = new JsonObject();
                 if (suffix == "validate") input["typeVersion"] = Integer(false);
                 if (suffix == "list") input["query"] = new JsonObject();
                 if (suffix == "count") input["filter"] = new JsonObject();
+                if (suffix == "getHistory") input["query"] = new JsonObject();
                 JsonObject output = suffix switch
                 {
                     "list" => new() { ["fields"] = new JsonObject { ["items"] = new JsonObject { ["kind"] = "array", ["maxItems"] = 200, ["required"] = true, ["items"] = RecordSchema() }, ["nextCursor"] = new JsonObject { ["kind"] = "string", ["nullable"] = true, ["required"] = true } } },
                     "count" => new() { ["fields"] = new JsonObject { ["count"] = Text() } },
+                    "getHistory" => new() { ["fields"] = new JsonObject { ["items"] = new JsonObject { ["kind"] = "array", ["maxItems"] = 200, ["required"] = true, ["items"] = RecordSchema() }, ["nextCursor"] = new JsonObject { ["kind"] = "string", ["nullable"] = true, ["required"] = true } } },
                     "validate" => new(),
                     "delete" => new() { ["fields"] = new JsonObject { ["id"] = Text(), ["type"] = Text(), ["revision"] = Integer(), ["deleted"] = new JsonObject { ["kind"] = "boolean", ["required"] = true } } },
                     _ => RecordSchema()
                 };
                 return new("records." + suffix, 1, "Typed record " + suffix, new JsonObject { ["fields"] = input }, output,
-                    suffix is "create" or "update" or "delete" ? "write" : "read", true, [], [],
-                    ["input.expectedRevision", "input.typeVersion", "output.typeVersion", "output.revision", "output.items[].typeVersion", "output.items[].revision"]);
+                    suffix is "create" or "update" or "delete" ? "write" : "read", suffix is not ("getRevision" or "getHistory"), [], [],
+                    ["input.expectedRevision", "input.typeVersion", "input.revision", "output.typeVersion", "output.revision", "output.items[].typeVersion", "output.items[].revision"]);
             }
         }
         public Task<JsonNode?> ExecuteAsync(InvocationContext context, IUnitOfWork uow, JsonObject input, IDispatcher dispatcher, CancellationToken ct) =>

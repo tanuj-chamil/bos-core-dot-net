@@ -30,6 +30,9 @@ public static class ApiHost
     // Generated discovery documents describe the entire catalogue; this separate bound
     // does not change request, record, or flow/business-output budgets.
     private const int ToolingResponseBytes = 2 * 1024 * 1024;
+    private const int AttachmentContentBytes = 25 * 1024 * 1024;
+    private const int AttachmentRequestBytes = AttachmentContentBytes + 1024 * 1024;
+    private sealed class AttachmentWriteMarker;
     private static readonly JsonSerializerOptions ResponseJson = new()
     {
         MaxDepth = CanonicalJson.MaxDepth + 2, // Allow the transport envelope around a valid application result.
@@ -53,7 +56,7 @@ public static class ApiHost
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             kestrel.AddServerHeader = false;
-            kestrel.Limits.MaxRequestBodySize = options.RequestBodyBytes;
+            kestrel.Limits.MaxRequestBodySize = AttachmentRequestBytes;
             kestrel.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(10);
         });
         if (options.HttpsCertificatePath is not null)
@@ -102,6 +105,13 @@ public static class ApiHost
             runner.Dispatcher = application;
             return application;
         });
+        builder.Services.AddSingleton<IAttachmentApi>(sp => (IAttachmentApi)sp.GetRequiredService<IApplicationApi>());
+        builder.Services.Configure<FormOptions>(form =>
+        {
+            form.MultipartBodyLengthLimit = AttachmentRequestBytes;
+            form.MultipartHeadersLengthLimit = 16 * 1024;
+            form.ValueCountLimit = 1;
+        });
         builder.Services.AddHostedService<StorageLifetime>();
         builder.Services.AddSingleton<StorageLifetimeState>();
         var keys = Path.Combine(options.DataDirectory, "keys");
@@ -121,7 +131,8 @@ public static class ApiHost
         builder.Services.AddCors(cors => cors.AddDefaultPolicy(policy =>
         {
             if (options.AllowedOrigins.Length != 0)
-                policy.WithOrigins(options.AllowedOrigins).WithMethods("GET", "POST").WithHeaders("Content-Type", "Authorization", "Idempotency-Key", "X-CSRF-TOKEN").WithExposedHeaders("Retry-After").AllowCredentials();
+                policy.WithOrigins(options.AllowedOrigins).WithMethods("GET", "POST").WithHeaders("Content-Type", "Authorization", "Idempotency-Key", "X-CSRF-TOKEN")
+                    .WithExposedHeaders("Retry-After", "Content-Disposition", "ETag", "Accept-Ranges", "Content-Range").AllowCredentials();
         }));
         builder.Services.AddRateLimiter(rate =>
         {
@@ -139,7 +150,8 @@ public static class ApiHost
                 var id = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
                 if (context.User.Identity?.IsAuthenticated != true || id is null) return RateLimitPartition.GetNoLimiter("anonymous");
                 var method = context.GetEndpoint()?.Metadata.GetMetadata<MethodDescriptor>();
-                var write = method?.Mutating == true || context.Request.Path.StartsWithSegments("/v1/auth") && HttpMethods.IsPost(context.Request.Method);
+                var write = method?.Mutating == true || context.GetEndpoint()?.Metadata.GetMetadata<AttachmentWriteMarker>() is not null ||
+                    context.Request.Path.StartsWithSegments("/v1/auth") && HttpMethods.IsPost(context.Request.Method);
                 return RateLimitPartition.GetFixedWindowLimiter(id + (write ? ":write" : ":read"), _ => Window(write ? options.WriteRequestsPerMinute : options.ReadRequestsPerMinute));
             });
         });
@@ -150,17 +162,19 @@ public static class ApiHost
             context.Items[TraceKey] = Guid.NewGuid().ToString("D");
             context.Response.Headers.CacheControl = "no-store";
             context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+            var attachmentUpload = IsAttachmentUpload(context);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
-            deadline.CancelAfter(options.ExecutionMilliseconds);
+            deadline.CancelAfter(attachmentUpload ? TimeSpan.FromMinutes(2) : TimeSpan.FromMilliseconds(options.ExecutionMilliseconds));
             var disconnected = context.RequestAborted;
             context.RequestAborted = deadline.Token;
             try
             {
-                if (context.Request.ContentLength > options.RequestBodyBytes)
+                var requestLimit = attachmentUpload ? AttachmentRequestBytes : options.RequestBodyBytes;
+                if (context.Request.ContentLength > requestLimit)
                     throw new BosException("REQUEST_TOO_LARGE", "Request body exceeds the byte limit.", 413);
-                if (HttpMethods.IsPost(context.Request.Method) && context.Request.Path.StartsWithSegments("/v1")) ValidateMediaType(context);
+                if (HttpMethods.IsPost(context.Request.Method) && context.Request.Path.StartsWithSegments("/v1") && !attachmentUpload) ValidateMediaType(context);
                 var feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
-                if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = options.RequestBodyBytes;
+                if (feature is { IsReadOnly: false }) feature.MaxRequestBodySize = requestLimit;
                 await next(context);
                 if (context.Response.StatusCode >= 400 && !context.Response.HasStarted && context.Response.ContentLength is null)
                     await Error(context, StatusError(context.Response.StatusCode), disconnected);
@@ -271,6 +285,36 @@ public static class ApiHost
                 await ApplicationResult(context, response, tooling: method.Name == "system.getCapabilities");
             }).WithMetadata(method);
         }
+        app.MapPost("/v1/attachments", async (HttpContext context, IAntiforgery antiforgery, IAttachmentApi attachmentApi) =>
+        {
+            if (context.Request.QueryString.HasValue) throw new BosException("INVALID_REQUEST", "Query arguments are not accepted.", 400);
+            var caller = Authentication.RequireCaller(context);
+            if (Authentication.IsCookie(context)) await antiforgery.ValidateRequestAsync(context);
+            var key = context.Request.Headers["Idempotency-Key"];
+            if (key.Count != 1) throw new BosException("INVALID_REQUEST", "Exactly one idempotency key is required.", 400);
+            if (!context.Request.HasFormContentType || !context.Request.ContentType!.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase))
+                throw new BosException("UNSUPPORTED_MEDIA_TYPE", "A multipart/form-data body is required.", 415);
+            var form = await context.Request.ReadFormAsync(context.RequestAborted);
+            if (form.Count != 0 || form.Files.Count != 1 || form.Files[0].Name != "file")
+                throw new BosException("INVALID_REQUEST", "The multipart body must contain exactly one file part named 'file' and no fields.", 400);
+            var file = form.Files[0];
+            if (file.Length > AttachmentContentBytes) throw new BosException("REQUEST_TOO_LARGE", "Attachment exceeds the 25 MiB limit.", 413);
+            await using var stream = new MemoryStream((int)file.Length);
+            await file.CopyToAsync(stream, context.RequestAborted);
+            var result = await attachmentApi.UploadAttachmentAsync(file.FileName,
+                string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType,
+                stream.ToArray(), caller, key[0]!, context.RequestAborted);
+            await Result(context, result);
+        }).WithMetadata(new AttachmentWriteMarker());
+        app.MapGet("/v1/attachments/{id}/content", async (HttpContext context, string id, IAttachmentApi attachmentApi) =>
+        {
+            if (context.Request.QueryString.HasValue) throw new BosException("INVALID_REQUEST", "Query arguments are not accepted.", 400);
+            var caller = Authentication.RequireCaller(context);
+            var download = await attachmentApi.DownloadAttachmentAsync(id, caller, context.RequestAborted);
+            var etag = new EntityTagHeaderValue('"' + download.Metadata["sha256"]!.GetValue<string>() + '"');
+            await Results.File(download.Content, download.Metadata["contentType"]!.GetValue<string>(),
+                download.Metadata["fileName"]!.GetValue<string>(), entityTag: etag, enableRangeProcessing: true).ExecuteAsync(context);
+        });
         app.MapPost("/v1/methods/{methodName}", async (HttpContext context, string methodName) =>
         {
             var caller = Authentication.RequireCaller(context);
@@ -313,6 +357,8 @@ public static class ApiHost
             return false;
         }
     }
+
+    private static bool IsAttachmentUpload(HttpContext context) => HttpMethods.IsPost(context.Request.Method) && context.Request.Path == "/v1/attachments";
 
     private static void RequireHttps(HttpContext context)
     {
@@ -468,6 +514,12 @@ public static class ApiHost
                 }
             } };
         }
+        if (!schemas.ContainsKey("Bos.Attachment"))
+        {
+            var attachmentMethod = methods.Single(method => method.Name == "attachments.list");
+            _ = OpenApiSchema(attachmentMethod.OutputSchema, schemas);
+        }
+        AddAttachmentPaths(paths);
         AddAuthenticationPaths(paths);
         return new JsonObject
         {
@@ -528,6 +580,42 @@ public static class ApiHost
         ["type"] = "object", ["required"] = new JsonArray("result", "meta"),
         ["properties"] = new JsonObject { ["result"] = result, ["meta"] = new JsonObject { ["$ref"] = "#/components/schemas/Meta" } }
     };
+
+    private static void AddAttachmentPaths(JsonObject paths)
+    {
+        var bearerOrCookie = new JsonArray(new JsonObject { ["bearerAuth"] = new JsonArray() }, new JsonObject { ["cookieAuth"] = new JsonArray() });
+        var writeSecurity = new JsonArray(new JsonObject { ["bearerAuth"] = new JsonArray() }, new JsonObject { ["cookieAuth"] = new JsonArray(), ["csrfToken"] = new JsonArray() });
+        var errors = new JsonObject { ["description"] = "Safe error", ["content"] = JsonContent(new JsonObject { ["$ref"] = "#/components/schemas/ErrorResponse" }) };
+        paths["/v1/attachments"] = new JsonObject { ["post"] = new JsonObject
+        {
+            ["operationId"] = "attachments.upload", ["x-bos-grant"] = "", ["x-bos-mutating"] = true,
+            ["security"] = writeSecurity, ["parameters"] = new JsonArray(
+                new JsonObject { ["name"] = "Idempotency-Key", ["in"] = "header", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string", ["minLength"] = 16, ["maxLength"] = 128 } }),
+            ["requestBody"] = new JsonObject { ["required"] = true, ["content"] = new JsonObject { ["multipart/form-data"] = new JsonObject { ["schema"] = new JsonObject
+            {
+                ["type"] = "object", ["additionalProperties"] = false, ["required"] = new JsonArray("file"),
+                ["properties"] = new JsonObject { ["file"] = new JsonObject { ["type"] = "string", ["format"] = "binary" } }
+            } } } },
+            ["responses"] = new JsonObject
+            {
+                ["200"] = new JsonObject { ["description"] = "Uploaded to private pending storage", ["content"] = JsonContent(ResponseSchema(new JsonObject { ["$ref"] = "#/components/schemas/Bos.Attachment" })) },
+                ["default"] = errors.DeepClone()
+            }
+        } };
+        paths["/v1/attachments/{id}/content"] = new JsonObject { ["get"] = new JsonObject
+        {
+            ["operationId"] = "attachments.download", ["x-bos-grant"] = "record.read", ["x-bos-readOnly"] = true,
+            ["security"] = bearerOrCookie, ["parameters"] = new JsonArray(new JsonObject
+            {
+                ["name"] = "id", ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/Bos.Uuid" }
+            }),
+            ["responses"] = new JsonObject
+            {
+                ["200"] = new JsonObject { ["description"] = "Attachment content", ["content"] = new JsonObject { ["application/octet-stream"] = new JsonObject { ["schema"] = new JsonObject { ["type"] = "string", ["format"] = "binary" } } } },
+                ["default"] = errors
+            }
+        } };
+    }
 
     private static void AddAuthenticationPaths(JsonObject paths)
     {

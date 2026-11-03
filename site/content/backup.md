@@ -12,7 +12,7 @@ bos backup --data-dir ./bos-data --output ./snapshot.bosbak
 
 The destination must be a new file outside the workspace, and its parent directory must already exist. BOS Core never overwrites an existing archive.
 
-The backup contains a verified SQLite snapshot, workspace configuration, and required protected key files. Every payload is hashed in the archive manifest before the temporary output is renamed into place.
+The backup contains a verified SQLite snapshot, including linked attachment content, workspace configuration, and required protected key files. Every payload is hashed in the archive manifest before the temporary output is renamed into place. Removed attachment bytes and expired pending uploads are not retained.
 
 Do not copy only `bos.db` from an active workspace. SQLite may have committed data in its WAL files.
 

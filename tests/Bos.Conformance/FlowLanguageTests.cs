@@ -211,6 +211,43 @@ public sealed class FlowLanguageTests
     }
 
     [Fact]
+    public async Task Extended_schema_values_bind_with_normalization_as_the_flow_authority()
+    {
+        var source = Source(Return(Object(
+            ("total", Fn("toString", Fn("add", Path("input.rate"), Decimal("0.50")))),
+            ("at", Path("input.at")),
+            ("labels", Path("input.labels")),
+            ("choice", Path("input.choice")),
+            ("money", Path("input.money")))));
+        source["inputSchema"] = JsonNode.Parse("""
+        {"fields":{
+            "rate":{"kind":"percentage","precision":5,"scale":2,"required":true},
+            "at":{"kind":"time","required":true},
+            "labels":{"kind":"map","maxProperties":2,"values":{"kind":"integer"},"required":true},
+            "choice":{"kind":"taggedUnion","variants":{"Count":{"kind":"integer"}},"required":true},
+            "money":{"kind":"money","precision":8,"scale":2,"currencies":["USD"],"required":true}
+        }}
+        """);
+        source["outputSchema"] = JsonNode.Parse("""
+        {"fields":{
+            "total":{"kind":"string","required":true},
+            "at":{"kind":"time","required":true},
+            "labels":{"kind":"map","maxProperties":2,"values":{"kind":"integer"},"required":true},
+            "choice":{"kind":"taggedUnion","variants":{"Count":{"kind":"integer"}},"required":true},
+            "money":{"kind":"money","precision":8,"scale":2,"currencies":["USD"],"required":true}
+        }}
+        """);
+        var input = JsonNode.Parse("""{"rate":"1.2","at":"12:03:04.5","labels":{"a":"+01"},"choice":{"tag":"Count","value":"+02"},"money":{"amount":"3.4","currency":"usd"}}""")!.AsObject();
+        var result = await Run(source, input);
+        Assert.Equal("1.70", result!["total"]!.GetValue<string>());
+        Assert.Equal("12:03:04.500", result["at"]!.GetValue<string>());
+        Assert.Equal("1", result["labels"]!["a"]!.GetValue<string>());
+        Assert.Equal("2", result["choice"]!["value"]!.GetValue<string>());
+        Assert.Equal("3.40", result["money"]!["amount"]!.GetValue<string>());
+        Assert.Equal("USD", result["money"]!["currency"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task Runtime_budget_is_shared_by_helper_items()
     {
         var context = Context(); context.Budget.Node(9995);

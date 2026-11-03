@@ -380,14 +380,140 @@ public sealed class HttpTests
     }
 
     [Fact]
+    public async Task Attachments_upload_download_link_fields_and_remove_with_record_permissions()
+    {
+        await using var host = await RunningHost.Start();
+        var api = host.App.Services.GetRequiredService<IApplicationApi>();
+        var serviceGrants = new JsonArray(new JsonObject { ["action"] = "types.read", ["resource"] = "Unrelated" });
+        var service = await TestWorkspace.CreateServiceAsync(api, host.App.Services.GetRequiredService<IIdentityService>(), host.Admin, "AttachmentUploader", serviceGrants);
+        var attachmentApi = (IAttachmentApi)api;
+        var privateBytes = "private pending upload"u8.ToArray();
+        var invalidMedia = await Assert.ThrowsAsync<BosException>(() => attachmentApi.UploadAttachmentAsync("invalid.txt", "text/plain; charset=\"", privateBytes, service.Caller, Guid.NewGuid().ToString("N")));
+        Assert.Equal("INVALID_REQUEST", invalidMedia.Code);
+        var privatePending = await attachmentApi.UploadAttachmentAsync("private.txt", "text/plain", privateBytes, service.Caller, Guid.NewGuid().ToString("N"));
+        var hidden = await Assert.ThrowsAsync<BosException>(() => attachmentApi.DownloadAttachmentAsync(privatePending["id"]!.GetValue<string>(), host.Admin));
+        Assert.Equal("NOT_FOUND", hidden.Code);
+        Assert.Equal(privateBytes, (await attachmentApi.DownloadAttachmentAsync(privatePending["id"]!.GetValue<string>(), service.Caller)).Content);
+        var draft = (await api.InvokeAsync("types.create", JsonNode.Parse("""{"definition":{"name":"AttachmentNote","fields":{"title":{"kind":"string","required":true},"file":{"kind":"attachment","required":true,"nullable":true}}}}""")!.AsObject(), host.Admin, Guid.NewGuid().ToString("N"))).Result!;
+        await api.InvokeAsync("types.publish", new JsonObject { ["name"] = "AttachmentNote", ["expectedRevision"] = draft["draftRevision"]!.DeepClone() }, host.Admin, Guid.NewGuid().ToString("N"));
+
+        using var client = host.Client();
+        await host.Login(client);
+        var key = Guid.NewGuid().ToString("N");
+        var bytes = "attachment evidence"u8.ToArray();
+        async Task<HttpResponseMessage> Upload()
+        {
+            var csrf = await RunningHost.Csrf(client);
+            var content = new MultipartFormDataContent();
+            var file = new ByteArrayContent(bytes);
+            file.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+            content.Add(file, "file", "evidence.txt");
+            var request = new HttpRequestMessage(HttpMethod.Post, "/v1/attachments") { Content = content };
+            request.Headers.Add("Idempotency-Key", key);
+            request.Headers.Add(csrf.Header, csrf.Token);
+            return await client.SendAsync(request);
+        }
+        using var uploadedResponse = await Upload();
+        Assert.Equal(HttpStatusCode.OK, uploadedResponse.StatusCode);
+        var uploaded = (await uploadedResponse.Content.ReadFromJsonAsync<JsonObject>())!["result"]!.AsObject();
+        var attachmentId = uploaded["id"]!.GetValue<string>();
+        Assert.Equal("pending", uploaded["state"]!.GetValue<string>());
+        Assert.Null(uploaded["recordId"]);
+        Assert.Equal("evidence.txt", uploaded["fileName"]!.GetValue<string>());
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(bytes)), uploaded["sha256"]!.GetValue<string>());
+        using var createdResponse = await host.Rpc(client, "records.create", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["data"] = new JsonObject { ["title"] = "Evidence", ["file"] = attachmentId }
+        }, true);
+        Assert.Equal(HttpStatusCode.OK, createdResponse.StatusCode);
+        var record = (await createdResponse.Content.ReadFromJsonAsync<JsonObject>())!["result"]!.AsObject();
+        var recordId = record["id"]!.GetValue<string>();
+        var replayGrants = new JsonArray(
+            new JsonObject { ["action"] = "record.read", ["resource"] = "AttachmentNote" },
+            new JsonObject { ["action"] = "record.update", ["resource"] = "AttachmentNote" });
+        var replayService = await TestWorkspace.CreateServiceAsync(api, host.App.Services.GetRequiredService<IIdentityService>(), host.Admin, "ReplayUploader", replayGrants);
+        var replayKey = Guid.NewGuid().ToString("N");
+        var replayPending = await attachmentApi.UploadAttachmentAsync("replay.txt", "text/plain", privateBytes, replayService.Caller, replayKey);
+        var replayLinked = (await api.InvokeAsync("attachments.link", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = replayPending["id"]!.DeepClone(), ["expectedRevision"] = 1
+        }, replayService.Caller, Guid.NewGuid().ToString("N"))).Result!;
+        var rolePage = (await api.InvokeAsync("roles.list", new JsonObject { ["query"] = new JsonObject
+        {
+            ["where"] = new JsonArray(new JsonObject { ["field"] = "name", ["op"] = "eq", ["value"] = "ReplayUploaderRole" })
+        } }, host.Admin, null)).Result!;
+        var replayRole = Assert.Single(rolePage["items"]!.AsArray())!;
+        await api.InvokeAsync("roles.update", new JsonObject
+        {
+            ["id"] = replayRole["id"]!.DeepClone(), ["expectedRevision"] = replayRole["revision"]!.DeepClone(),
+            ["changes"] = new JsonObject { ["grants"] = serviceGrants.DeepClone() }
+        }, host.Admin, Guid.NewGuid().ToString("N"));
+        Assert.Equal("NOT_FOUND", (await Assert.ThrowsAsync<BosException>(() => attachmentApi.UploadAttachmentAsync("replay.txt", "text/plain", privateBytes, replayService.Caller, replayKey))).Code);
+        await api.InvokeAsync("attachments.remove", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = replayLinked["id"]!.DeepClone(), ["expectedRevision"] = 2
+        }, host.Admin, Guid.NewGuid().ToString("N"));
+        using var replayResponse = await Upload();
+        var replay = (await replayResponse.Content.ReadFromJsonAsync<JsonObject>())!["result"]!;
+        Assert.Equal(attachmentId, replay["id"]!.GetValue<string>());
+        Assert.Equal("linked", replay["state"]!.GetValue<string>());
+
+        using var download = await client.GetAsync($"/v1/attachments/{attachmentId}/content");
+        Assert.Equal(HttpStatusCode.OK, download.StatusCode);
+        Assert.Equal(bytes, await download.Content.ReadAsByteArrayAsync());
+        Assert.Equal("attachment; filename=evidence.txt; filename*=UTF-8''evidence.txt", download.Content.Headers.ContentDisposition!.ToString());
+        using var listedResponse = await host.Rpc(client, "attachments.list", new JsonObject { ["type"] = "AttachmentNote", ["recordId"] = recordId }, false);
+        var listed = (await listedResponse.Content.ReadFromJsonAsync<JsonObject>())!["result"]!["items"]!.AsArray();
+        Assert.Equal(attachmentId, Assert.Single(listed)!["id"]!.GetValue<string>());
+        key = Guid.NewGuid().ToString("N");
+        using var secondUploadResponse = await Upload();
+        var secondAttachmentId = (await secondUploadResponse.Content.ReadFromJsonAsync<JsonObject>())!["result"]!["id"]!.GetValue<string>();
+        using var explicitlyLinked = await host.Rpc(client, "attachments.link", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = secondAttachmentId, ["expectedRevision"] = 1
+        }, true);
+        Assert.Equal("linked", (await explicitlyLinked.Content.ReadFromJsonAsync<JsonObject>())!["result"]!["state"]!.GetValue<string>());
+        using var explicitlyRemoved = await host.Rpc(client, "attachments.remove", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = secondAttachmentId, ["expectedRevision"] = 2
+        }, true);
+        Assert.Equal(HttpStatusCode.OK, explicitlyRemoved.StatusCode);
+
+        using var stillInUse = await host.Rpc(client, "attachments.remove", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = attachmentId, ["expectedRevision"] = 2
+        }, true);
+        await AssertError(stillInUse, HttpStatusCode.Conflict, "IN_USE");
+        using var cleared = await host.Rpc(client, "records.update", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["id"] = recordId, ["expectedRevision"] = 1,
+            ["patch"] = new JsonObject { ["file"] = null }
+        }, true);
+        Assert.Equal(HttpStatusCode.OK, cleared.StatusCode);
+        using var removed = await host.Rpc(client, "attachments.remove", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["recordId"] = recordId, ["id"] = attachmentId, ["expectedRevision"] = 2
+        }, true);
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        using var missing = await client.GetAsync($"/v1/attachments/{attachmentId}/content");
+        await AssertError(missing, HttpStatusCode.NotFound, "NOT_FOUND");
+        using var deleted = await host.Rpc(client, "records.delete", new JsonObject
+        {
+            ["type"] = "AttachmentNote", ["id"] = recordId, ["expectedRevision"] = 2
+        }, true);
+        Assert.Equal(HttpStatusCode.OK, deleted.StatusCode);
+    }
+
+    [Fact]
     public void Build_snapshot_contains_all_http_and_auth_routes_with_resolved_response_metadata()
     {
         var document = JsonNode.Parse(ApiHost.OpenApi(MethodCatalogue.All).ToJsonString(new JsonSerializerOptions { WriteIndented = true }))!.AsObject();
         var paths = document["paths"]!.AsObject();
         var methods = MethodCatalogue.All.Where(method => method.Transport == "http").ToArray();
-        Assert.Equal(53, methods.Length);
+        Assert.Equal(58, methods.Length);
         string[] authPaths = ["/v1/auth/antiforgery", "/v1/auth/login", "/v1/auth/logout", "/v1/auth/change-password"];
-        var expectedPaths = methods.Select(method => "/v1/methods/" + method.Name).Concat(authPaths);
+        var expectedPaths = methods.Select(method => "/v1/methods/" + method.Name).Concat(authPaths)
+            .Concat(["/v1/attachments", "/v1/attachments/{id}/content"]);
         Assert.Equal(expectedPaths.Order(StringComparer.Ordinal), paths.Select(path => path.Key).Order(StringComparer.Ordinal));
         AssertOpenApiReferences(document);
         foreach (var method in methods)

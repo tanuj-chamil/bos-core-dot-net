@@ -406,9 +406,27 @@ public sealed class FlowCompiler(IOperationRegistry registry) : IFlowCompiler
         internal static Shape Schema(JsonObject schema, IReadOnlyList<string>? metadataPaths = null, string path = "")
         {
             string kind = schema["kind"]?.GetValue<string>() ?? (schema.ContainsKey("fields") ? "object" : "unknown");
-            if (kind is "enum" or "reference") kind = "string";
-            return new(kind, schema["fields"] is JsonObject f ? f.ToDictionary(x => x.Key, x => Schema((JsonObject)x.Value!, metadataPaths, path + "." + x.Key), StringComparer.Ordinal) : null,
-                schema["items"] is JsonObject i ? Schema(i, metadataPaths, path + "[]") : null, schema["required"]?.GetValue<bool>() ?? false,
+            Dictionary<string, Shape>? fields = schema["fields"] is JsonObject f
+                ? f.ToDictionary(x => x.Key, x => Schema((JsonObject)x.Value!, metadataPaths, path + "." + x.Key), StringComparer.Ordinal) : null;
+            Shape? item = schema["items"] is JsonObject i ? Schema(i, metadataPaths, path + "[]") : null;
+            Shape Required(string value) => new(value, Required: true);
+            switch (kind)
+            {
+                case "enum": case "reference": case "userReference": case "attachment":
+                case "time": case "localDateTime": case "duration": case "calendarPeriod": case "offsetDateTime": kind = "string"; break;
+                case "percentage": kind = "decimal"; break;
+                case "map": kind = "object"; fields = null; break;
+                case "taggedUnion": kind = "object"; fields = new(StringComparer.Ordinal) { ["tag"] = Required("string"), ["value"] = new("unknown", Required: true) }; break;
+                case "money": kind = "object"; fields = new(StringComparer.Ordinal) { ["amount"] = Required("decimal"), ["currency"] = Required("string") }; break;
+                case "quantity": kind = "object"; fields = new(StringComparer.Ordinal) { ["value"] = Required("decimal"), ["unit"] = Required("string") }; break;
+                case "geopoint": kind = "object"; fields = new(StringComparer.Ordinal) { ["latitude"] = Required("decimal"), ["longitude"] = Required("decimal") }; break;
+                case "dateRange": kind = "object"; fields = new(StringComparer.Ordinal) { ["start"] = Required("date"), ["end"] = Required("date") }; break;
+                case "instantRange": kind = "object"; fields = new(StringComparer.Ordinal) { ["start"] = Required("instant"), ["end"] = Required("instant") }; break;
+                case "polymorphicReference": kind = "object"; fields = new(StringComparer.Ordinal) { ["type"] = Required("string"), ["id"] = Required("string") }; break;
+                case "versionedReference": kind = "object"; fields = new(StringComparer.Ordinal) { ["id"] = Required("string"), ["revision"] = Required("integer") }; break;
+                case "multiEnum": kind = "array"; item = Required("string"); break;
+            }
+            return new(kind, fields, item, schema["required"]?.GetValue<bool>() ?? false,
                 schema["nullable"]?.GetValue<bool>() ?? false, schema.ContainsKey("default"), Metadata: metadataPaths?.Contains(path, StringComparer.Ordinal) == true);
         }
     }

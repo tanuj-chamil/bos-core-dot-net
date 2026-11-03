@@ -16,8 +16,8 @@ public static class MethodCatalogue
     public static IReadOnlySet<string> ReservedMethods { get; } = new[]
     {
         "types.activate", "types.archive", "types.compare",
-        "records.validateUpdate", "records.find", "records.replace", "records.restore", "records.getHistory",
-        "records.getRevision", "records.exists", "records.first", "records.single", "records.getMany",
+        "records.validateUpdate", "records.find", "records.replace", "records.restore",
+        "records.exists", "records.first", "records.single", "records.getMany",
         "records.aggregate", "records.distinct", "records.getRelated", "records.link", "records.unlink",
         "records.createMany", "records.updateMany", "records.deleteMany", "records.migrate",
         "flows.call", "flows.cancel", "flows.enqueue", "policies.create", "policies.update", "policies.validate",
@@ -90,6 +90,11 @@ public static class MethodCatalogue
         Add("records.validate", false, "record.read", Object([("type", Ref("Name")), ("data", Ref("DataObject")), ("typeVersion", Ref("Revision"))], "type", "data"), Ref("ValidationReport"), true);
         Add("records.list", false, "record.read", QueryArgs("RecordQuery", ("type", Ref("Name"))), Page(Union(Ref("Record"), Ref("ProjectedRecord"))), true);
         Add("records.count", false, "record.read", Object([("type", Ref("Name")), ("filter", Default(Ref("RecordCountFilter"), new JsonObject()))], "type"), Object([("count", Ref("CountString"))], "count"), true);
+        Add("records.getRevision", false, "record.read", Object([("type", Ref("Name")), ("id", Ref("Uuid")), ("revision", Ref("Revision"))], "type", "id", "revision"), Ref("Record"));
+        Add("records.getHistory", false, "record.read", Object([("type", Ref("Name")), ("id", Ref("Uuid")), ("query", Default(Object([("limit", Default(Integer(1, 200), JsonValue.Create(50)!)), ("cursor", Nullable(Text(16384, 1)))]), new JsonObject()))], "type", "id"), Page(Ref("Record")));
+        Add("attachments.list", false, "record.read", Object([("type", Ref("Name")), ("recordId", Ref("Uuid"))], "type", "recordId"), Object([("items", Array(Ref("Attachment"), 100))], "items"));
+        Add("attachments.link", true, "record.update", Object([("type", Ref("Name")), ("recordId", Ref("Uuid")), ("id", Ref("Uuid")), ("expectedRevision", Ref("Revision"))], "type", "recordId", "id", "expectedRevision"), Ref("Attachment"));
+        Add("attachments.remove", true, "record.update", Object([("type", Ref("Name")), ("recordId", Ref("Uuid")), ("id", Ref("Uuid")), ("expectedRevision", Ref("Revision"))], "type", "recordId", "id", "expectedRevision"), Ref("Attachment"));
 
         Add("operations.list", false, "operations.execute", QueryArgs("OperationQuery"), Page(Ref("OperationDescriptor")));
         var operationArgs = new[] { ("name", Ref("OperationName")), ("contractVersion", Ref("Revision")) };
@@ -214,6 +219,13 @@ public static class MethodCatalogue
             ("id", Ref("Uuid")), ("type", Ref("Name")), ("typeVersion", Ref("Revision")), ("revision", Ref("Revision")),
             ("deleted", Boolean()), ("data", Ref("DataObject")), ("createdAt", Ref("Instant")), ("createdBy", Ref("Uuid")), ("updatedAt", Ref("Instant")), ("updatedBy", Ref("Uuid"))
         ], "id", "type", "typeVersion", "revision", "deleted", "data", "createdAt", "createdBy", "updatedAt", "updatedBy");
+        d["Attachment"] = Object([
+            ("id", Ref("Uuid")), ("type", Nullable(Ref("Name"))), ("recordId", Nullable(Ref("Uuid"))), ("state", Enum("pending", "linked", "deleted")), ("revision", Ref("Revision")),
+            ("deleted", Boolean()), ("fileName", Text(255, 1)), ("contentType", Text(200, 3)),
+            ("sizeBytes", Integer(0, AttachmentService.MaximumBytes)), ("sha256", Ref("Hash")),
+            ("createdAt", Ref("Instant")), ("createdBy", Ref("Uuid")), ("updatedAt", Ref("Instant")),
+            ("updatedBy", Ref("Uuid")), ("expiresAt", Nullable(Ref("Instant"))), ("downloadUrl", Text(512, 1))
+        ], "id", "type", "recordId", "state", "revision", "deleted", "fileName", "contentType", "sizeBytes", "sha256", "createdAt", "createdBy", "updatedAt", "updatedBy", "expiresAt", "downloadUrl");
         d["ProjectedRecord"] = Object([("id", Ref("Uuid")), ("type", Ref("Name")), ("typeVersion", Ref("Revision")), ("revision", Ref("Revision")), ("data", Ref("DataObject"))], "id", "type", "typeVersion", "revision", "data");
         d["TombstoneReceipt"] = Object([("id", Ref("Uuid")), ("type", Ref("Name")), ("revision", Ref("Revision")), ("deleted", Constant(true))], "id", "type", "revision", "deleted");
 
@@ -310,10 +322,11 @@ public static class MethodCatalogue
             ("expressionDepth", Integer(1, 16)), ("evaluatedNodes", Integer(1, 10000)), ("loopItems", Integer(1, 100)), ("sdkCalls", Integer(1, 200)),
             ("mutations", Integer(1, 250)), ("returnedRecords", Integer(1, 1000)), ("queryPage", Integer(1, 200)), ("queryFilters", Integer(1, 10)), ("queryInItems", Integer(1, 50)),
             ("queryVmInstructions", Integer(1, 1000000)), ("executionMilliseconds", Integer(1, 2000)), ("queryMilliseconds", Integer(1, 1000)),
-            ("outputBytes", Integer(1, 65536)), ("diagnosticBytes", Integer(1, 16384))
+            ("outputBytes", Integer(1, 65536)), ("diagnosticBytes", Integer(1, 16384)),
+            ("attachmentBytes", Integer(1, AttachmentService.MaximumBytes)), ("recordAttachments", Integer(1, 100))
         ], "requestBytes", "yamlBytes", "astBytes", "staticSteps", "schemaFields", "schemaDepth", "arrayItems", "recordScalars",
             "expressionDepth", "evaluatedNodes", "loopItems", "sdkCalls", "mutations", "returnedRecords", "queryPage", "queryFilters",
-            "queryInItems", "queryVmInstructions", "executionMilliseconds", "queryMilliseconds", "outputBytes", "diagnosticBytes");
+            "queryInItems", "queryVmInstructions", "executionMilliseconds", "queryMilliseconds", "outputBytes", "diagnosticBytes", "attachmentBytes", "recordAttachments");
         d["Capabilities"] = Object([
             ("productVersion", Text(100, 1)), ("specificationVersion", Constant("1.0.0")), ("releaseStatus", Text(100, 1)),
             ("flowFormats", Array(Text(100, 1), 10, 1)), ("astFormats", Array(Text(100, 1), 10, 1)),
@@ -333,33 +346,75 @@ public static class MethodCatalogue
     private static JsonObject FieldDefinition(bool persistent, bool top)
     {
         var variants = new List<JsonObject>();
-        foreach (var kind in new[] { "string", "integer", "decimal", "boolean", "date", "instant", "enum", "reference", "object", "array" })
+        foreach (var kind in new[]
+        {
+            "string", "integer", "decimal", "boolean", "date", "instant", "enum", "reference", "object", "array",
+            "time", "localDateTime", "duration", "calendarPeriod", "offsetDateTime", "map", "taggedUnion", "money",
+            "percentage", "quantity", "geopoint", "dateRange", "instantRange", "multiEnum", "polymorphicReference",
+            "versionedReference", "userReference", "attachment"
+        })
         {
             var properties = new List<(string, JsonObject)>
             {
                 ("kind", Constant(kind)), ("required", Default(Boolean(), JsonValue.Create(false)!)),
-                ("nullable", Default(Boolean(), JsonValue.Create(false)!)), ("default", Ref("DataValue"))
+                ("nullable", Default(Boolean(), JsonValue.Create(false)!)), ("default", Ref("JsonValue"))
             };
             var required = new List<string> { "kind" };
             if (persistent)
             {
                 properties.Add(("managedBy", Array(Ref("OperationName"), 200)));
-                if (top && kind is not ("object" or "array")) properties.Add(("indexed", Boolean()));
-                if (top && kind is not ("object" or "array" or "reference")) properties.Add(("unique", Boolean()));
+                if (top && kind is "string" or "integer" or "decimal" or "boolean" or "date" or "instant" or "enum" or "reference"
+                    or "time" or "localDateTime" or "duration" or "calendarPeriod" or "offsetDateTime" or "percentage")
+                    properties.Add(("indexed", Boolean()));
+                if (top && kind is "string" or "integer" or "decimal" or "boolean" or "date" or "instant" or "enum"
+                    or "time" or "localDateTime" or "duration" or "calendarPeriod" or "offsetDateTime" or "percentage")
+                    properties.Add(("unique", Boolean()));
             }
-            if (kind == "string") properties.Add(("maxLength", Integer(0, 16384)));
+            if (kind == "string")
+            {
+                properties.Add(("minLength", Integer(0, 16384)));
+                properties.Add(("maxLength", Integer(0, 16384)));
+                properties.Add(("format", Enum("email", "phone", "url", "uuid", "uri", "slug", "ipAddress", "hostname", "countryCode", "currencyCode", "locale", "timeZone")));
+                properties.Add(("pattern", Text(256)));
+            }
             if (kind is "integer" or "decimal")
             {
-                properties.Add(("minimum", Ref(kind == "integer" ? "IntegerString" : "DecimalString")));
-                properties.Add(("maximum", Ref(kind == "integer" ? "IntegerString" : "DecimalString")));
+                var number = Ref(kind == "integer" ? "IntegerString" : "DecimalString");
+                foreach (var name in new[] { "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf" })
+                    properties.Add((name, number));
             }
+            if (kind is "percentage" or "money" or "quantity")
+                foreach (var name in new[] { "minimum", "maximum" }) properties.Add((name, Ref("DecimalString")));
             switch (kind)
             {
-                case "decimal": properties.Add(("precision", Integer(1, 28))); properties.Add(("scale", Integer(0, 12))); required.AddRange(["precision", "scale"]); break;
+                case "decimal":
+                case "percentage":
+                    properties.Add(("precision", Integer(1, 28))); properties.Add(("scale", Integer(0, 12))); required.AddRange(["precision", "scale"]); break;
                 case "enum": properties.Add(("values", Array(Text(), 200, 1, unique: true))); required.Add("values"); break;
                 case "reference": properties.Add(("targetType", Ref("Name"))); required.Add("targetType"); break;
                 case "object": properties.Add(("fields", NameMap(Ref(persistent ? "NestedField" : "DataField")))); required.Add("fields"); break;
-                case "array": properties.Add(("items", Ref(persistent ? "NestedField" : "DataField"))); properties.Add(("maxItems", Integer(0, 200))); required.AddRange(["items", "maxItems"]); break;
+                case "array":
+                    properties.Add(("items", Ref(persistent ? "NestedField" : "DataField"))); properties.Add(("minItems", Integer(0, 200)));
+                    properties.Add(("maxItems", Integer(0, 200))); properties.Add(("uniqueItems", Boolean())); required.AddRange(["items", "maxItems"]); break;
+                case "map":
+                    properties.Add(("values", Ref(persistent ? "NestedField" : "DataField"))); properties.Add(("minProperties", Integer(0, 200)));
+                    properties.Add(("maxProperties", Integer(0, 200))); properties.Add(("maxKeyLength", Integer(1, 200))); properties.Add(("keyPattern", Text(256)));
+                    required.AddRange(["values", "maxProperties"]); break;
+                case "taggedUnion":
+                    var union = NameMap(Ref(persistent ? "NestedField" : "DataField")); union["minProperties"] = 1; union["maxProperties"] = 20;
+                    properties.Add(("variants", union)); required.Add("variants"); break;
+                case "money":
+                    properties.Add(("precision", Integer(1, 28))); properties.Add(("scale", Integer(0, 12)));
+                    properties.Add(("currencies", Array(new JsonObject { ["type"] = "string", ["pattern"] = "^[A-Z]{3}$" }, 200, 1, unique: true)));
+                    required.AddRange(["precision", "scale"]); break;
+                case "quantity":
+                    properties.Add(("precision", Integer(1, 28))); properties.Add(("scale", Integer(0, 12)));
+                    properties.Add(("units", Array(Text(), 200, 1, unique: true))); required.AddRange(["precision", "scale", "units"]); break;
+                case "multiEnum":
+                    properties.Add(("values", Array(Text(), 200, 1, unique: true))); properties.Add(("minItems", Integer(0, 200)));
+                    properties.Add(("maxItems", Integer(0, 200))); required.AddRange(["values", "maxItems"]); break;
+                case "polymorphicReference": properties.Add(("targetTypes", Array(Ref("Name"), 200, 1, unique: true))); required.Add("targetTypes"); break;
+                case "versionedReference": properties.Add(("targetType", Ref("Name"))); required.Add("targetType"); break;
             }
             variants.Add(Object(properties.ToArray(), required.ToArray()));
         }

@@ -165,6 +165,13 @@ public sealed class MaterialRequestTests
         await api.InvokeAsync("types.create", Parse("""{"definition":{"name":"BackupNote","fields":{"text":{"kind":"string","required":true}}}}"""), login.Caller, NewKey());
         await api.InvokeAsync("types.publish", Parse("""{"name":"BackupNote","expectedRevision":1}"""), login.Caller, NewKey());
         var storedRecord = (await api.InvokeAsync("records.create", Parse("""{"type":"BackupNote","data":{"text":"snapshot business data"}}"""), login.Caller, NewKey())).Result!;
+        var attachmentBytes = "snapshot attachment data"u8.ToArray();
+        var pendingAttachment = await ((IAttachmentApi)api).UploadAttachmentAsync("snapshot.txt", "text/plain", attachmentBytes, login.Caller, NewKey());
+        var storedAttachment = (await api.InvokeAsync("attachments.link", new JsonObject
+        {
+            ["type"] = "BackupNote", ["recordId"] = storedRecord["id"]!.DeepClone(),
+            ["id"] = pendingAttachment["id"]!.DeepClone(), ["expectedRevision"] = 1
+        }, login.Caller, NewKey())).Result!;
         var service = await CreateServiceAsync(api, identity, login.Caller, "BackupClient", AllGrants());
         await using (var write = await factory.BeginWriteAsync())
         {
@@ -193,10 +200,20 @@ public sealed class MaterialRequestTests
         await Assert.ThrowsAsync<BosException>(() => restoredIdentity.LoginAsync("Admin", sourcePassword));
         await using var read = await restoredFactory.BeginReadAsync();
         Assert.True(JsonNode.DeepEquals(storedRecord, await read.Records.GetAsync(Text(storedRecord, "id"))));
+        Assert.True(JsonNode.DeepEquals(storedAttachment, PublicAttachment(await read.Attachments.GetAsync(Text(storedAttachment, "id")))));
+        Assert.Equal(attachmentBytes, await read.Attachments.GetContentAsync(Text(storedAttachment, "id")));
         Assert.NotNull((await read.Documents.GetAsync("tokens", "restore-token"))!["revokedAt"]);
         Assert.True((await read.Documents.GetAsync("receipts", "committed"))!["result"]!["preserved"]!.GetValue<bool>());
         Assert.Equal("interrupted", Text((await read.Documents.GetAsync("runs", "abandoned"))!, "status"));
         Assert.Equal("interrupted", Text((await read.Documents.GetAsync("receipts", "running-key"))!["result"]!, "status"));
+
+        static JsonObject? PublicAttachment(JsonObject? metadata)
+        {
+            metadata = metadata is null ? null : (JsonObject)metadata.DeepClone();
+            metadata?.Remove("ownerId"); metadata?.Remove("inputHash");
+            if (metadata is not null) metadata["downloadUrl"] = "/v1/attachments/" + metadata["id"]!.GetValue<string>() + "/content";
+            return metadata;
+        }
     }
 
     [Fact]
@@ -453,7 +470,7 @@ public sealed class MaterialRequestTests
         { DataSource = database, Mode = Microsoft.Data.Sqlite.SqliteOpenMode.ReadWrite, Pooling = false }.ToString()))
         {
             await connection.OpenAsync();
-            using var command = connection.CreateCommand(); command.CommandText = "PRAGMA user_version=2";
+            using var command = connection.CreateCommand(); command.CommandText = "PRAGMA user_version=3";
             await command.ExecuteNonQueryAsync();
         }
         var before = await File.ReadAllBytesAsync(database);

@@ -21,6 +21,8 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
                 case "records.validate": JsonArgs.Only(args, "type", "data", "typeVersion"); break;
                 case "records.list": JsonArgs.Only(args, "type", "query"); break;
                 case "records.count": JsonArgs.Only(args, "type", "filter"); break;
+                case "records.getRevision": JsonArgs.Only(args, "type", "id", "revision"); break;
+                case "records.getHistory": JsonArgs.Only(args, "type", "id", "query"); break;
                 default: throw new BosException("FEATURE_NOT_AVAILABLE", "The record method is not available.", 404);
             }
             var type = JsonArgs.Name(JsonArgs.String(args, "type"));
@@ -30,6 +32,22 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
                 var record = await ReadAsync(type, id, context, uow, ct);
                 context.Budget.ReturnRecords(1);
                 return record.DeepClone();
+            }
+            if (method is "records.getRevision" or "records.getHistory")
+            {
+                var id = JsonArgs.Uuid(JsonArgs.String(args, "id"));
+                await RequireHistoryTargetAsync(type, id, context, uow, ct);
+                if (method == "records.getRevision")
+                {
+                    var revision = JsonArgs.Int(args, "revision");
+                    if (revision < 1) throw new BosException("INVALID_REQUEST", "Revision must be positive.", 400, "revision");
+                    var record = await uow.Records.GetRevisionAsync(id, revision, ct);
+                    if (record is null || record["type"]!.GetValue<string>() != type) throw NotFound();
+                    CheckPin(type, record["typeVersion"]!.GetValue<int>(), context);
+                    context.Budget.ReturnRecords(1);
+                    return record.DeepClone();
+                }
+                return await queries.RecordHistoryAsync(uow, context, type, id, JsonArgs.Object(args, "query", new JsonObject()), ct);
             }
             authorization.Require(context, "record.read", type);
             context.ReadTypes.Add(type);
@@ -68,6 +86,14 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         CheckPin(type, record["typeVersion"]!.GetValue<int>(), context);
         context.ReadTypes.Add(type);
         return record;
+    }
+
+    private async Task RequireHistoryTargetAsync(string type, string id, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
+    {
+        if (!authorization.Can(context, "record.read", type)) throw NotFound();
+        var record = await uow.Records.GetAsync(id, ct);
+        if (record is null || record["type"]!.GetValue<string>() != type) throw NotFound();
+        context.ReadTypes.Add(type);
     }
 
     private async Task<(int Version, JsonObject Definition)> ResolveAsync(string type, int? version, InvocationContext context, IUnitOfWork uow, CancellationToken ct, bool creating = false)
@@ -165,6 +191,48 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
                 GuardValue(items, item, oldItem, updating, context, $"{path}[{i}]");
             }
         }
+        else if (field["kind"]?.GetValue<string>() == "map")
+        {
+            var values = value as JsonObject;
+            var oldValues = previous as JsonObject;
+            var keys = (values?.Select(pair => pair.Key) ?? []).Concat(oldValues?.Select(pair => pair.Key) ?? []).Distinct(StringComparer.Ordinal);
+            var child = field["values"]!.AsObject();
+            foreach (var key in keys)
+            {
+                JsonNode? item = null;
+                JsonNode? oldItem = null;
+                var present = values?.TryGetPropertyValue(key, out item) == true;
+                var oldPresent = oldValues?.TryGetPropertyValue(key, out oldItem) == true;
+                if (updating && present == oldPresent && JsonNode.DeepEquals(item, oldItem)) continue;
+                var childPath = $"{path}[{CanonicalJson.Serialize(JsonValue.Create(key))}]";
+                if (child["managedBy"] is JsonArray managed && managed.Count != 0 && !Allowed(managed, context.GuardOwner))
+                    throw new BosException("POLICY_VIOLATION", "The field requires an allowed business operation.", 403, childPath);
+                GuardValue(child, item, oldItem, updating, context, childPath);
+            }
+        }
+        else if (field["kind"]?.GetValue<string>() == "taggedUnion")
+        {
+            var tagged = value as JsonObject;
+            var oldTagged = previous as JsonObject;
+            var tag = tagged?["tag"]?.GetValue<string>();
+            var oldTag = oldTagged?["tag"]?.GetValue<string>();
+            if (tag == oldTag && tag is not null)
+                GuardVariant(tag, tagged!["value"], oldTagged?["value"], updating);
+            else
+            {
+                if (oldTag is not null) GuardVariant(oldTag, null, oldTagged!["value"], updating);
+                if (tag is not null) GuardVariant(tag, tagged!["value"], null, updating);
+            }
+
+            void GuardVariant(string variantName, JsonNode? variantValue, JsonNode? oldVariantValue, bool isUpdate)
+            {
+                var variant = field["variants"]![variantName]!.AsObject();
+                var variantPath = path + ".value";
+                if (variant["managedBy"] is JsonArray managed && managed.Count != 0 && !Allowed(managed, context.GuardOwner))
+                    throw new BosException("POLICY_VIOLATION", "The field requires an allowed business operation.", 403, variantPath);
+                GuardValue(variant, variantValue, oldVariantValue, isUpdate, context, variantPath);
+            }
+        }
     }
 
     private async Task<JsonObject> CreateAsync(string type, JsonObject args, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
@@ -175,11 +243,12 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         var input = JsonArgs.Object(args, "data");
         GuardFields(definition["fields"]!.AsObject(), input, null, context);
         var data = Schema.Normalize(definition, input);
-        await RequireReferencesAsync(definition, data, context, uow, ct);
+        var id = JsonArgs.Uuid(ids.NewId());
+        var pendingAttachments = await RequireReferencesAsync(definition, data, id, context, uow, ct);
         var now = Timestamp();
         var record = new JsonObject
         {
-            ["id"] = JsonArgs.Uuid(ids.NewId()), ["type"] = type, ["typeVersion"] = version,
+            ["id"] = id, ["type"] = type, ["typeVersion"] = version,
             ["revision"] = 1, ["deleted"] = false, ["data"] = data,
             ["createdAt"] = now, ["createdBy"] = context.PrincipalId,
             ["updatedAt"] = now, ["updatedBy"] = context.PrincipalId
@@ -187,7 +256,7 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         context.Budget.Mutation();
         context.Budget.ReturnRecords(1);
         await uow.Records.SaveAsync(record, definition, context, ct);
-        var id = record["id"]!.GetValue<string>();
+        await LinkPendingAttachmentsAsync(pendingAttachments, type, id, context, uow, ct);
         context.CreatedRecordIds.Add(id);
         context.ChangedRecordIds.Add(id);
         return (JsonObject)record.DeepClone();
@@ -210,7 +279,7 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         var data = Schema.Normalize(definition, merged, false);
         GuardFields(definition["fields"]!.AsObject(), data, old, context);
         if (JsonNode.DeepEquals(data, old)) throw new BosException("NO_CHANGE", "The normalized record is unchanged.", 409);
-        await RequireReferencesAsync(definition, data, context, uow, ct);
+        var pendingAttachments = await RequireReferencesAsync(definition, data, id, context, uow, ct);
         if (expected == int.MaxValue) throw new BosException("INVALID_STATE", "The record revision limit has been reached.", 409);
         record["revision"] = expected + 1;
         record["data"] = data;
@@ -219,6 +288,7 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         context.Budget.Mutation();
         context.Budget.ReturnRecords(1);
         await uow.Records.SaveAsync(record, definition, context, ct);
+        await LinkPendingAttachmentsAsync(pendingAttachments, type, id, context, uow, ct);
         context.ChangedRecordIds.Add(id);
         return (JsonObject)record.DeepClone();
     }
@@ -234,6 +304,7 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         GuardType(definition, context);
         if (context.CreatedRecordIds.Contains(id)) throw new BosException("INVALID_STATE", "A record created in this invocation cannot be deleted.", 409);
         if (await uow.Records.HasIncomingReferencesAsync(id, ct)) throw new BosException("IN_USE", "The record is in use.", 409);
+        if (await uow.Attachments.HasLinkedAsync(id, ct)) throw new BosException("IN_USE", "Remove linked attachments before deleting the record.", 409);
         if (expected == int.MaxValue) throw new BosException("INVALID_STATE", "The record revision limit has been reached.", 409);
         record["revision"] = expected + 1;
         record["deleted"] = true;
@@ -257,7 +328,7 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         if (report.Valid)
         {
             var data = Schema.Normalize(definition, input);
-            errors.AddRange(await ReferenceErrorsAsync(definition, data, context, uow, ct));
+            errors.AddRange((await ReferenceErrorsAsync(definition, data, null, context, uow, ct)).Errors);
         }
         return new JsonObject
         {
@@ -266,18 +337,20 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
         };
     }
 
-    private async Task RequireReferencesAsync(JsonObject definition, JsonObject data, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
+    private async Task<IReadOnlySet<string>> RequireReferencesAsync(JsonObject definition, JsonObject data, string? recordId, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
     {
-        var errors = await ReferenceErrorsAsync(definition, data, context, uow, ct);
-        if (errors.Count != 0) throw new BosException("INVALID_REQUEST", "Record references are unavailable.", 422) { Details = errors };
+        var result = await ReferenceErrorsAsync(definition, data, recordId, context, uow, ct);
+        if (result.Errors.Count != 0) throw new BosException("INVALID_REQUEST", "Record references are unavailable.", 422) { Details = result.Errors };
+        return result.PendingAttachments;
     }
 
-    private async Task<IReadOnlyList<FieldError>> ReferenceErrorsAsync(JsonObject definition, JsonObject data, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
+    private async Task<(IReadOnlyList<FieldError> Errors, IReadOnlySet<string> PendingAttachments)> ReferenceErrorsAsync(JsonObject definition, JsonObject data, string? recordId, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
     {
         var errors = new List<FieldError>();
+        var pendingAttachments = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (name, field) in definition["fields"]!.AsObject())
             await VisitAsync(field!.AsObject(), data[name], name);
-        return errors;
+        return (errors, pendingAttachments);
 
         async Task VisitAsync(JsonObject field, JsonNode? value, string path)
         {
@@ -303,6 +376,39 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
                     }
                     break;
                 }
+                case "polymorphicReference":
+                {
+                    var reference = value.AsObject();
+                    await CurrentReferenceAsync(reference["type"]!.GetValue<string>(), reference["id"]!.GetValue<string>(), path);
+                    break;
+                }
+                case "versionedReference":
+                {
+                    var type = field["targetType"]!.GetValue<string>();
+                    var reference = value.AsObject();
+                    if (!authorization.Can(context, "record.read", type)) { Unavailable(path); break; }
+                    var target = await uow.Records.GetRevisionAsync(reference["id"]!.GetValue<string>(), reference["revision"]!.GetValue<int>(), ct);
+                    if (target is null || target["deleted"]!.GetValue<bool>() || target["type"]!.GetValue<string>() != type) Unavailable(path);
+                    else { CheckPin(type, target["typeVersion"]!.GetValue<int>(), context); context.ReadTypes.Add(type); }
+                    break;
+                }
+                case "userReference":
+                    if (await uow.Documents.GetAsync("users", value.GetValue<string>(), ct) is null) Unavailable(path);
+                    break;
+                case "attachment":
+                {
+                    var attachmentId = value.GetValue<string>();
+                    var attachment = await uow.Attachments.GetAsync(attachmentId, ct);
+                    if (attachment is null || attachment["state"]!.GetValue<string>() == "deleted") { Unavailable(path); break; }
+                    if (attachment["state"]!.GetValue<string>() == "pending")
+                    {
+                        if (attachment["ownerId"]!.GetValue<string>() != context.PrincipalId ||
+                            string.CompareOrdinal(attachment["expiresAt"]!.GetValue<string>(), Timestamp()) <= 0) Unavailable(path);
+                        else pendingAttachments.Add(attachmentId);
+                    }
+                    else if (recordId is null || attachment["recordId"]!.GetValue<string>() != recordId) Unavailable(path);
+                    break;
+                }
                 case "object":
                     foreach (var (name, child) in field["fields"]!.AsObject())
                         await VisitAsync(child!.AsObject(), value.AsObject()[name], path + "." + name);
@@ -311,7 +417,45 @@ public sealed class RecordService(IAuthorization authorization, IQueryEngine que
                     var array = value.AsArray();
                     for (var i = 0; i < array.Count; i++) await VisitAsync(field["items"]!.AsObject(), array[i], $"{path}[{i}]");
                     break;
+                case "map":
+                    foreach (var (name, item) in value.AsObject()) await VisitAsync(field["values"]!.AsObject(), item, path + "." + name);
+                    break;
+                case "taggedUnion":
+                    var tagged = value.AsObject();
+                    await VisitAsync(field["variants"]![tagged["tag"]!.GetValue<string>()]!.AsObject(), tagged["value"], path + ".value");
+                    break;
             }
+
+            async Task CurrentReferenceAsync(string type, string id, string referencePath)
+            {
+                if (!authorization.Can(context, "record.read", type)) { Unavailable(referencePath); return; }
+                var target = await uow.Records.GetAsync(id, ct);
+                if (target is null || target["deleted"]!.GetValue<bool>() || target["type"]!.GetValue<string>() != type) Unavailable(referencePath);
+                else { CheckPin(type, target["typeVersion"]!.GetValue<int>(), context); context.ReadTypes.Add(type); }
+            }
+            void Unavailable(string referencePath) => errors.Add(new(referencePath, "INVALID_REQUEST", "Reference is unavailable."));
+        }
+    }
+
+    private async Task LinkPendingAttachmentsAsync(IReadOnlySet<string> idsToLink, string type, string recordId, InvocationContext context, IUnitOfWork uow, CancellationToken ct)
+    {
+        if (idsToLink.Count == 0) return;
+        if ((await uow.Attachments.ListAsync(recordId, 100, ct)).Count + idsToLink.Count > 100)
+            throw new BosException("CAPACITY_EXCEEDED", "The record attachment limit has been reached.", 409);
+        foreach (var attachmentId in idsToLink)
+        {
+            var metadata = await uow.Attachments.GetAsync(attachmentId, ct) ?? throw new BosException("INVALID_REQUEST", "Attachment is unavailable.", 422);
+            var expected = metadata["revision"]!.GetValue<int>();
+            AttachmentService.Link(metadata, type, recordId, context);
+            context.Budget.Mutation();
+            await uow.Attachments.UpdateAsync(metadata, expected, ct);
+            await uow.Documents.AppendAuditAsync(new JsonObject
+            {
+                ["timestamp"] = metadata["updatedAt"]!.DeepClone(), ["actor"] = context.PrincipalId,
+                ["credentialId"] = context.Caller.CredentialId, ["method"] = "attachments.link", ["commandId"] = context.CommandId,
+                ["objectId"] = attachmentId, ["type"] = type, ["oldRevision"] = expected,
+                ["newRevision"] = expected + 1, ["outcome"] = "succeeded"
+            }, ct);
         }
     }
 

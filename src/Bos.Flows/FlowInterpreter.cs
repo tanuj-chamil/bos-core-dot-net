@@ -251,14 +251,45 @@ public sealed class FlowInterpreter(IOperationRegistry registry) : IFlowInterpre
             {
                 "object" => FlowValue.Object(node.AsObject().Select(x => KeyValuePair.Create(x.Key, Decode(x.Value, schema["fields"]![x.Key]!.AsObject())))),
                 "array" => FlowValue.Array(node.AsArray().Select(x => Decode(x, schema["items"]!.AsObject()))),
+                "map" => FlowValue.Object(node.AsObject().Select(x => KeyValuePair.Create(x.Key, Decode(x.Value, schema["values"]!.AsObject())))),
+                "taggedUnion" => DecodeTaggedUnion(node.AsObject(), schema),
+                "money" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["amount"] = FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node["amount"]))), ["currency"] = FlowValue.Text(FlowCompiler.String(node["currency"])) }),
+                "percentage" => FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node))),
+                "quantity" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["value"] = FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node["value"]))), ["unit"] = FlowValue.Text(FlowCompiler.String(node["unit"])) }),
+                "geopoint" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["latitude"] = FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node["latitude"]))), ["longitude"] = FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node["longitude"]))) }),
+                "dateRange" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["start"] = DecodeDate(node["start"]), ["end"] = DecodeDate(node["end"]) }),
+                "instantRange" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["start"] = DecodeInstant(node["start"]), ["end"] = DecodeInstant(node["end"]) }),
+                "multiEnum" => FlowValue.Array(node.AsArray().Select(x => FlowValue.Text(FlowCompiler.String(x)))),
+                "polymorphicReference" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["type"] = FlowValue.Text(FlowCompiler.String(node["type"])), ["id"] = FlowValue.Text(FlowCompiler.String(node["id"])) }),
+                "versionedReference" => FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+                    { ["id"] = FlowValue.Text(FlowCompiler.String(node["id"])), ["revision"] = FlowValue.Integer(node["revision"]!.GetValue<int>()) }),
                 "integer" => FlowValue.Integer(FlowValue.ParseInteger(FlowCompiler.String(node))),
                 "decimal" => FlowValue.Decimal(ExactDecimal.Parse(FlowCompiler.String(node))),
-                "date" => FlowValue.Date(DateOnly.ParseExact(FlowCompiler.String(node), "yyyy-MM-dd", CultureInfo.InvariantCulture)),
-                "instant" => FlowValue.Instant(DateTimeOffset.Parse(FlowCompiler.String(node), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)),
+                "date" => DecodeDate(node),
+                "instant" => DecodeInstant(node),
                 "boolean" => FlowValue.Bool(node.GetValue<bool>()),
                 _ => FlowValue.Text(FlowCompiler.String(node))
             };
         }
+
+        private FlowValue DecodeTaggedUnion(JsonObject node, JsonObject schema)
+        {
+            var tag = FlowCompiler.String(node["tag"]);
+            return FlowValue.Object(new Dictionary<string, FlowValue>(StringComparer.Ordinal)
+            {
+                ["tag"] = FlowValue.Text(tag),
+                ["value"] = Decode(node["value"], schema["variants"]![tag]!.AsObject())
+            });
+        }
+
+        private static FlowValue DecodeDate(JsonNode? node) => FlowValue.Date(DateOnly.ParseExact(FlowCompiler.String(node), "yyyy-MM-dd", CultureInfo.InvariantCulture));
+        private static FlowValue DecodeInstant(JsonNode? node) => FlowValue.Instant(DateTimeOffset.Parse(FlowCompiler.String(node), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
 
         private static JsonObject BindInput(FlowValue value, JsonObject schema, string operation, HashSet<string> metadataPaths)
         {
@@ -316,7 +347,14 @@ public sealed class FlowInterpreter(IOperationRegistry registry) : IFlowInterpre
             if (value.Kind == ValueKind.Null) return; // Schema owns nullability.
             string kind = schema["kind"]?.GetValue<string>() ?? (schema.ContainsKey("fields") ? "object" : "unknown");
             if (kind == "unknown") return;
-            if (kind is "reference" or "enum") kind = "string";
+            kind = kind switch
+            {
+                "reference" or "enum" or "userReference" or "attachment" or "time" or "localDateTime" or "duration" or "calendarPeriod" or "offsetDateTime" => "string",
+                "percentage" => "decimal",
+                "map" or "taggedUnion" or "money" or "quantity" or "geopoint" or "dateRange" or "instantRange" or "polymorphicReference" or "versionedReference" => "object",
+                "multiEnum" => "array",
+                _ => kind
+            };
             string actual = value.Kind.ToString().ToLowerInvariant();
             if (actual != kind && !(actual == "string" && kind is "integer" or "decimal" or "date" or "instant"))
                 throw new BosException("TYPE_MISMATCH", "Value kind does not match receiving schema.");
@@ -388,6 +426,13 @@ public sealed class FlowInterpreter(IOperationRegistry registry) : IFlowInterpre
                 return FlowValue.Object(fields);
             }
             string kind = schema["kind"]?.GetValue<string>() ?? (schema.ContainsKey("fields") ? "object" : "unknown");
+            if (output is JsonObject && kind is "map" or "taggedUnion" or "money" or "quantity" or "geopoint" or "dateRange" or "instantRange" or "polymorphicReference" or "versionedReference"
+                || output is JsonArray && kind == "multiEnum")
+            {
+                var compositeSchema = new JsonObject { ["fields"] = new JsonObject { ["value"] = schema.DeepClone() } };
+                var normalizedComposite = Schema.Normalize(compositeSchema, new JsonObject { ["value"] = output.DeepClone() }, false);
+                return Decode(normalizedComposite["value"], schema);
+            }
             if (output is JsonObject obj)
             {
                 if (kind is not ("object" or "unknown")) throw new BosException("OUTPUT_INVALID", "Operation output kind mismatch.");
