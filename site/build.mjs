@@ -62,11 +62,35 @@ await writeFile(path.join(outputDirectory, '404.html'), renderNotFoundPage());
 await writeFile(path.join(outputDirectory, '.nojekyll'), '');
 await writeFile(path.join(outputDirectory, 'sitemap.xml'), renderSitemap());
 await writeFile(path.join(outputDirectory, 'robots.txt'), `User-agent: *\nAllow: /\nSitemap: ${siteUrl}${withBaseFile('sitemap.xml')}\n`);
+await writeFile(path.join(outputDirectory, 'llms.txt'), renderLlmsText());
 
 console.log(`Built ${pages.length} Markdoc pages in ${path.relative(rootDirectory, outputDirectory)}`);
 
 function page(source, route, title, section, description) {
   return { source, route, title, section, description };
+}
+
+function renderLlmsText() {
+  const documentation = pages.map((item) =>
+    `- [${item.title}](${siteUrl}${withBase(item.route)}): ${item.description}`
+  );
+  return [
+    '# BOS Core',
+    '',
+    '> A single-tenant .NET business API for versioned records, role-based access, registered operations, and atomic YAML workflows.',
+    '',
+    'BOS Core runs as one service with a local SQLite workspace. The current release is a preview; APIs and stored formats may change before 1.0.',
+    '',
+    '## Documentation',
+    '',
+    ...documentation,
+    '',
+    '## Resources',
+    '',
+    `- [GitHub repository](${repositoryUrl}): Source code, issue tracking, and release history.`,
+    `- [OpenAPI discovery](${siteUrl}${withBase('guides/api')}#discovery): Authenticated runtime contract discovery.`,
+    ''
+  ].join('\n');
 }
 
 function normalizeBasePath(value) {
