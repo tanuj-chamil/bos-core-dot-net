@@ -1,0 +1,1 @@
+<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../Bos.Contracts/Bos.Contracts.csproj" /><ProjectReference Include="../Bos.Core/Bos.Core.csproj" /><PackageReference Include="YamlDotNet" Version="16.3.0" /></ItemGroup></Project>

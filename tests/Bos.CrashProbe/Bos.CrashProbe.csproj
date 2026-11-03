@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Bos.Application/Bos.Application.csproj" />
+    <ProjectReference Include="../../src/Bos.Core/Bos.Core.csproj" />
+    <ProjectReference Include="../../src/Bos.Identity/Bos.Identity.csproj" />
+    <ProjectReference Include="../../src/Bos.Flows/Bos.Flows.csproj" />
+    <ProjectReference Include="../../src/Bos.Sqlite/Bos.Sqlite.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+artifacts/
+TestResults/
+bos-data/
+*.bosbak
+*.secret
+*.pfx
+*.p12
+*.db
+*.db-wal
+*.db-shm
+.vs/

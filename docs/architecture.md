@@ -1,7 +1,7 @@
 # Architecture and invariants
 
 **Authority:** [Specification 1.0.0](specification-1.0.0.md), especially Sections 02–16, 27–29 and 33–38.\
-**Status:** implementation design baseline; no runtime or adapter conformance evidence yet.
+**Status:** implemented API review build; see [build evidence and remaining gates](build-report.md).
 
 ## 1. System boundary
 

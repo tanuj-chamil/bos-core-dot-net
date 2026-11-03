@@ -1,0 +1,6 @@
+<Project>
+  <Target Name="Archive">
+    <ZipDirectory SourceDirectory="$(MSBuildThisFileDirectory)../artifacts/linux-x64" DestinationFile="$(MSBuildThisFileDirectory)../artifacts/bos-linux-x64.zip" Overwrite="true" />
+    <ZipDirectory SourceDirectory="$(MSBuildThisFileDirectory)../artifacts/win-x64" DestinationFile="$(MSBuildThisFileDirectory)../artifacts/bos-win-x64.zip" Overwrite="true" />
+  </Target>
+</Project>

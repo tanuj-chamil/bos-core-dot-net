@@ -27,7 +27,20 @@ This register distinguishes product decisions already frozen by the specificatio
 
 ## 2. Implementation choices to verify
 
-These are engineering selections within the existing contract. No dependency version or design option below is represented as selected, restored or conformant yet.
+These are engineering selections within the existing contract. The original questions are retained below; the following implementation evidence now applies to the review build. Full release conformance is tracked separately.
+
+### Review-build resolutions
+
+- **E01–E04:** .NET SDK 10.0.111 / net10.0, Microsoft.Data.Sqlite 10.0.11 with SQLitePCLRaw 3.0.2, transaction-enlisted custom Identity stores/managers, and YamlDotNet 16.3.0 are selected and locked. Actual SQLite engine is 3.50.4.
+- **E05–E08:** exact BigInteger-based decimal/index encodings, authenticated keyset cursors, xUnit and actual SQLite/Kestrel/process-kill probes are implemented and tested on Linux. Explicit descriptor metadata paths prevent business/metadata integer ambiguity.
+- **E09–E12:** exclusive workspace ownership, protected key files, cookie stamp reloads, configurable timezone and per-RID publish are implemented. Linux no-installed-runtime smoke tests pass; Windows runtime/ACL/timezone evidence remains pending.
+- **Q01:** the review build rejects ambiguous multi-version creates rather than guessing; exact-version reads remain pinned. This is recorded for product review, not an implicit `latest` rule.
+- **Q04:** first successful login atomically redeems the bootstrap/reset password; the first session may change it. Repeated login with that secret fails. Password changes invalidate old session stamps.
+- **Q05:** the implementation's administrator predicate is an active principal granted `identity.manage:*`. Token issuance intersects issuer authority and target-principal grants; all administration paths preserve the last administrator. These security choices remain explicit review items.
+- **Q06:** C# DTOs/ports, the method catalogue and generated OpenAPI define the implemented wire shapes, including optional explicit step logs and metadata-path annotations.
+- **Q07:** rates use nonqueued fixed one-minute windows; login admission is ten attempts per socket IP per minute, independently of the specified Identity account lockout. Forwarded headers are not implicitly trusted.
+
+The table's open entries below identify remaining full validation/product-review work; they no longer imply an absent implementation. See [the build report](build-report.md) for actual commands and remaining certification gaps.
 
 | ID | Choice | Required proof / owner | Status |
 | --- | --- | --- | --- |

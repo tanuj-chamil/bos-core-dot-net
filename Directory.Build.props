@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- Publishing adds RID/SDK-tool dependencies; keep those locks separate from SDK builds. -->
+    <NuGetLockFilePath Condition="'$(RuntimeIdentifier)' != '' and '$(PublishSingleFile)' == 'true'">$(MSBuildProjectDirectory)/packages.$(RuntimeIdentifier).publish.lock.json</NuGetLockFilePath>
+    <Version>1.0.0-preview.1</Version>
+  </PropertyGroup>
+</Project>

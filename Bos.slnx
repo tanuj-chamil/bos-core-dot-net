@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Bos.Application/Bos.Application.csproj" />
+    <Project Path="src/Bos.Contracts/Bos.Contracts.csproj" />
+    <Project Path="src/Bos.Core/Bos.Core.csproj" />
+    <Project Path="src/Bos.Flows/Bos.Flows.csproj" />
+    <Project Path="src/Bos.Host/Bos.Host.csproj" />
+    <Project Path="src/Bos.Identity/Bos.Identity.csproj" />
+    <Project Path="src/Bos.Sqlite/Bos.Sqlite.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Bos.Conformance/Bos.Conformance.csproj" />
+    <Project Path="tests/Bos.CrashProbe/Bos.CrashProbe.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Bos.OpenApiGenerator/Bos.OpenApiGenerator.csproj" />
+  </Folder>
+</Solution>

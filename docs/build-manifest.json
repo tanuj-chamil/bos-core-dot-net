@@ -1,0 +1,66 @@
+{
+  "productVersion": "1.0.0-preview.1",
+  "specificationVersion": "1.0.0",
+  "status": "reviewBuild",
+  "measuredAtUtc": "2026-11-02T23:23:00Z",
+  "source": {
+    "baseCommit": "4d1c1bf4ffcfc139011b65f96867a54010a6b8d0",
+    "implementationCommitted": false,
+    "identityCapturedBeforePublication": true,
+    "fileCount": 84,
+    "digestAlgorithm": "SHA-256(sorted POSIX path UTF-8 + NUL + raw SHA-256 file digest)",
+    "inputs": ["src/**", "tests/**", "tools/**", "build/**", "Directory.Build.props", "global.json", "Bos.slnx"],
+    "excludedDirectories": ["bin", "obj"],
+    "sha256": "d1c72b7c1353889a297c1f8d6a4eaf093763a96bda87947730d488c979df293c"
+  },
+  "toolchain": {
+    "sdk": "10.0.111",
+    "runtime": "10.0.11",
+    "targetFramework": "net10.0",
+    "buildPlatform": "linux-x64",
+    "sqliteEngine": "3.50.4",
+    "configuration": "Release",
+    "lockedRestoreVerified": true,
+    "lockedRidPublishVerified": ["linux-x64", "win-x64"]
+  },
+  "tests": {
+    "passed": 432,
+    "failed": 0,
+    "skipped": 0,
+    "resultsPath": "artifacts/test-results/conformance.trx",
+    "sha256": "0a6d94733adf656ff525e374f93d8d4dce5ef50cc8f8cbe14ab282471af956c2"
+  },
+  "surface": {"httpMethods": 53, "authenticationRoutes": 4, "expressionHelpers": 39, "businessOperations": 5},
+  "managedAssemblies": {"hostBytes": 100352, "totalBosBytes": 685568},
+  "artifacts": [
+    {
+      "rid": "linux-x64",
+      "executable": "artifacts/linux-x64/bos",
+      "executableBytes": 103312473,
+      "executableSha256": "26af18cbc434ebaa7c627c90137a0a504b774c6e2aaa4f97830ef9b543616b53",
+      "executableWrittenAtUtc": "2026-11-02T23:22:00.359583Z",
+      "uncompressedBytes": 103870876,
+      "archive": "artifacts/bos-linux-x64.zip",
+      "archiveBytes": 47061251,
+      "archiveSha256": "9c86fca3908fbc64af3ef92d7edad039141089c6ccc87f7cf37b97c1a4263970",
+      "nativeExtractionBytes": 1434496,
+      "installedFileBytesExcludingWorkspace": 105305372,
+      "cleanRuntimeSmoke": "passed",
+      "containerImage": "mcr.microsoft.com/dotnet/runtime-deps@sha256:62028293921f5bd6db3d9f9119cd29cd926dfd3c2336da23b09f425e40c3c832"
+    },
+    {
+      "rid": "win-x64",
+      "executable": "artifacts/win-x64/bos.exe",
+      "executableBytes": 106884828,
+      "executableSha256": "b0dcbe21cefe4cb41ef08f3d6bb5516f0c509a280da31d461aa719f6d947cc2b",
+      "executableWrittenAtUtc": "2026-11-02T23:22:03.577580Z",
+      "uncompressedBytes": 107443691,
+      "archive": "artifacts/bos-win-x64.zip",
+      "archiveBytes": 47872644,
+      "archiveSha256": "561ca52fe6ae3c2f29d8f06c5708ac0cf88cd9c95742c6666bf4b52cc8b15382",
+      "installedFileBytesExcludingWorkspace": null,
+      "cleanRuntimeSmoke": "unverified"
+    }
+  ],
+  "releaseCertification": "incomplete; see docs/acceptance.md and docs/build-report.md"
+}

@@ -1,7 +1,7 @@
 # Documentation-first implementation plan
 
 **Baseline:** [BOS Core 1.0.0](specification-1.0.0.md), Sections 31–35.\
-**Status:** planned; no implementation workstream has started.\
+**Status:** first implementation integrated as an API review build; certification remains open.\
 **Release scope:** every initial method, mandatory semantic rule, Material Request scenario and A01–A24.
 
 ## 1. Delivery approach
