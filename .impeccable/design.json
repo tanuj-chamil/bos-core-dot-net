@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-03T02:06:38Z",
+  "title": "Design System: BOS Core Documentation",
+  "extensions": {
+    "colorMeta": {
+      "mineral-ground": { "role": "neutral", "displayName": "Mineral Ground", "canonical": "#f7f8fb" },
+      "reading-surface": { "role": "neutral", "displayName": "Reading Surface", "canonical": "#ffffff" },
+      "muted-surface": { "role": "neutral", "displayName": "Muted Surface", "canonical": "#f0f3f8" },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#172033" },
+      "body-copy": { "role": "neutral", "displayName": "Body Copy", "canonical": "#30394d" },
+      "muted-ink": { "role": "neutral", "displayName": "Muted Ink", "canonical": "#5d687d" },
+      "faint-ink": { "role": "neutral", "displayName": "Faint Ink", "canonical": "#626d81" },
+      "rule": { "role": "neutral", "displayName": "Rule", "canonical": "#d9dfE9" },
+      "strong-rule": { "role": "neutral", "displayName": "Strong Rule", "canonical": "#bac4d3" },
+      "action-blue": { "role": "primary", "displayName": "Action Blue", "canonical": "#2452d6" },
+      "action-blue-deep": { "role": "primary", "displayName": "Deep Action Blue", "canonical": "#193b9b" },
+      "action-blue-wash": { "role": "primary", "displayName": "Action Wash", "canonical": "#eaf0ff" },
+      "code-surface": { "role": "neutral", "displayName": "Code Surface", "canonical": "#111827" },
+      "code-ink": { "role": "neutral", "displayName": "Code Ink", "canonical": "#edf2ff" },
+      "warning-ink": { "role": "secondary", "displayName": "Warning Ink", "canonical": "#7a4a00" },
+      "warning-wash": { "role": "secondary", "displayName": "Warning Wash", "canonical": "#fff4d6" },
+      "focus": { "role": "primary", "displayName": "Focus Blue", "canonical": "#8eabff" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Article Display", "purpose": "Balanced article H1 headings, limited to 18ch." },
+      "headline": { "displayName": "Section Headline", "purpose": "Primary H2 section breaks." },
+      "title": { "displayName": "Subsection Title", "purpose": "H3 subsections." },
+      "body": { "displayName": "Reading Body", "purpose": "Long-form documentation within a 70ch measure." },
+      "lead": { "displayName": "Opening Lead", "purpose": "The first paragraph after an article H1." },
+      "label": { "displayName": "Navigation Label", "purpose": "Uppercase navigation and table-of-contents group labels." },
+      "code": { "displayName": "Code", "purpose": "Commands, source blocks, identifiers, and literal values." }
+    },
+    "shadows": [
+      { "name": "search-dialog", "value": "0 1.25rem 4rem rgba(22, 32, 51, 0.22)", "purpose": "Separates the modal search panel from its backdrop." },
+      { "name": "mobile-navigation", "value": "1rem 0 3rem rgba(22, 32, 51, 0.16)", "purpose": "Separates the open navigation drawer from the inert page." }
+    ],
+    "motion": [
+      { "name": "copy-reveal", "value": "140ms ease-out", "purpose": "Reveals and recolors the code copy control." },
+      { "name": "skip-link", "value": "160ms ease-out", "purpose": "Moves the skip link into view on focus." },
+      { "name": "mobile-navigation", "value": "180ms ease-out", "purpose": "Slides the mobile navigation drawer." },
+      { "name": "reduced-motion", "value": "0.01ms", "purpose": "Collapses transitions when reduced motion is requested." }
+    ],
+    "breakpoints": [
+      { "name": "without-page-toc", "value": "75rem" },
+      { "name": "mobile-navigation", "value": "50rem" },
+      { "name": "compact-reading", "value": "30rem" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Link",
+      "kind": "button",
+      "refersTo": "primary-link",
+      "description": "The filled recovery action used on the not-found page.",
+      "html": "<a class=\"ds-primary-link\" href=\"#\">Return to the documentation</a>",
+      "css": ".ds-primary-link { display: inline-block; padding: 0.65rem 0.9rem; border-radius: 0.35rem; background: var(--blue, #2452d6); color: #fff; font: 650 0.85rem ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; text-decoration: none; } .ds-primary-link:hover { background: var(--blue-deep, #193b9b); color: #fff; } .ds-primary-link:focus-visible { outline: 3px solid #8eabff; outline-offset: 3px; }"
+    },
+    {
+      "name": "Search Trigger",
+      "kind": "button",
+      "refersTo": "search-trigger",
+      "description": "A field-like masthead control that opens documentation search.",
+      "html": "<button class=\"ds-search-trigger\" type=\"button\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"6.5\"/><path d=\"m16 16 4 4\"/></svg><span>Search docs</span><kbd>Ctrl K</kbd></button>",
+      "css": ".ds-search-trigger { min-width: 16rem; display: flex; align-items: center; gap: 0.6rem; padding: 0.48rem 0.55rem 0.48rem 0.72rem; border: 1px solid var(--line-strong, #bac4d3); border-radius: 0.45rem; background: var(--surface, #fff); color: var(--muted, #5d687d); font: 1rem/1.7 ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; cursor: pointer; text-align: left; } .ds-search-trigger svg { width: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; } .ds-search-trigger span { flex: 1; } .ds-search-trigger kbd { padding: 0.08rem 0.35rem; border: 1px solid var(--line, #d9dfE9); border-radius: 0.25rem; background: var(--surface-muted, #f0f3f8); color: var(--faint, #626d81); font-size: 0.69rem; } .ds-search-trigger:hover { border-color: #8fa2c1; color: var(--ink, #172033); } .ds-search-trigger:focus-visible { outline: 3px solid #8eabff; outline-offset: 3px; }"
+    },
+    {
+      "name": "Active Navigation Item",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "The current-page state in the grouped documentation rail.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Documentation\"><a href=\"#\">Overview</a><a class=\"ds-nav-active\" href=\"#\" aria-current=\"page\">API and operator usage</a></nav>",
+      "css": ".ds-nav { width: 15rem; display: grid; gap: 0.12rem; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; } .ds-nav a { display: block; padding: 0.38rem 0.7rem; border-radius: 0.35rem; color: var(--muted, #5d687d); font-size: 0.88rem; font-weight: 500; line-height: 1.35; text-decoration: none; } .ds-nav a:hover { background: var(--surface-muted, #f0f3f8); color: var(--ink, #172033); } .ds-nav .ds-nav-active { background: var(--blue-wash, #eaf0ff); color: var(--blue-deep, #193b9b); font-weight: 680; } .ds-nav a:focus-visible { outline: 3px solid #8eabff; outline-offset: 3px; }"
+    },
+    {
+      "name": "Code Block",
+      "kind": "card",
+      "refersTo": "code-block",
+      "description": "A dark, scrollable command surface with a reveal-on-hover copy action.",
+      "html": "<div class=\"ds-code-block\"><pre><code>bos doctor --data-dir ./bos-data</code></pre><button type=\"button\">Copy</button></div>",
+      "css": ".ds-code-block { position: relative; margin: 1.6rem 0; } .ds-code-block pre { margin: 0; padding: 1.15rem 1.3rem; overflow: auto; border: 1px solid #263247; border-radius: 0.45rem; background: var(--code, #111827); color: var(--code-ink, #edf2ff); font: 0.82rem/1.65 \"Cascadia Code\", \"SFMono-Regular\", Consolas, \"Liberation Mono\", monospace; } .ds-code-block button { position: absolute; top: 0.55rem; right: 0.55rem; padding: 0.3rem 0.55rem; border: 1px solid #42516a; border-radius: 0.3rem; background: #1c2739; color: #cbd5e6; font: 0.7rem ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; cursor: pointer; opacity: 0; transition: opacity 140ms ease-out, background 140ms ease-out; } .ds-code-block:hover button, .ds-code-block button:focus-visible { opacity: 1; } .ds-code-block button:hover { background: #29364b; color: #fff; } .ds-code-block button:focus-visible { outline: 3px solid #8eabff; outline-offset: 3px; }"
+    },
+    {
+      "name": "Review Status Strip",
+      "kind": "custom",
+      "refersTo": "review-strip",
+      "description": "The persistent release-certification caveat shown below the masthead.",
+      "html": "<div class=\"ds-review-strip\" role=\"note\"><span>1.0.0-preview.1</span><strong>Review build</strong><span>Release certification incomplete</span></div>",
+      "css": ".ds-review-strip { height: 2.125rem; display: flex; align-items: center; justify-content: center; gap: 0.7rem; padding: 0 1rem; border-bottom: 1px solid #efd99c; background: var(--warning-wash, #fff4d6); color: var(--warning, #7a4a00); font: 0.78rem/1 ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; white-space: nowrap; } .ds-review-strip span + strong::before, .ds-review-strip strong + span::before { content: \"·\"; margin-right: 0.7rem; color: #b68a39; }"
+    },
+    {
+      "name": "Search Dialog",
+      "kind": "custom",
+      "refersTo": "search-dialog",
+      "description": "The bordered modal search panel with compact input and close control.",
+      "html": "<div class=\"ds-search-dialog\" role=\"dialog\" aria-label=\"Search documentation\"><div class=\"ds-search-field\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"6.5\"/><path d=\"m16 16 4 4\"/></svg><input type=\"search\" placeholder=\"Search documentation\"><button type=\"button\">Esc</button></div><p>Start typing to search pages and sections.</p></div>",
+      "css": ".ds-search-dialog { width: min(42rem, calc(100vw - 2rem)); max-height: min(38rem, calc(100vh - 4rem)); border: 1px solid var(--line-strong, #bac4d3); border-radius: 0.65rem; background: var(--surface, #fff); color: var(--ink, #172033); box-shadow: 0 1.25rem 4rem rgba(22, 32, 51, 0.22); font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif; } .ds-search-field { display: flex; align-items: center; gap: 0.7rem; padding: 0.85rem 1rem; border-bottom: 1px solid var(--line, #d9dfE9); } .ds-search-field svg { width: 1.2rem; fill: none; stroke: var(--muted, #5d687d); stroke-width: 1.8; } .ds-search-field input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--ink, #172033); font: inherit; } .ds-search-field button { padding: 0.28rem 0.48rem; border: 1px solid var(--line, #d9dfE9); border-radius: 0.3rem; background: var(--surface-muted, #f0f3f8); color: var(--muted, #5d687d); cursor: pointer; } .ds-search-field button:focus-visible { outline: 3px solid #8eabff; outline-offset: 3px; } .ds-search-dialog p { padding: 1.2rem; color: var(--muted, #5d687d); text-align: center; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operator's Dependable Map",
+    "overview": "BOS Core is a restrained technical reading system: a light mineral frame, a white document sheet, cool rules, ink text, one blue action family, and an amber review warning. It favors orientation, legibility, and evidence over marketing gestures or decorative spectacle.\n\nThe interface is compact around navigation and generous in the reading column. Its hierarchy comes from weight, measure, rules, and tonal surfaces rather than illustration or heavy elevation. `docs/` remains the canonical content source; `site/build.mjs` owns semantic structure, `site/src/styles.css` owns this visual system, and `site/src/site.js` owns only navigation, search, copy, and table-of-contents behavior.",
+    "keyCharacteristics": [
+      "Flat, cool-toned documentation surfaces with a single blue interaction family.",
+      "Dense navigation surrounding a calm, readable central sheet.",
+      "Persistent, unmistakable separation between review evidence and release certification.",
+      "Small system-sans type and restrained radii rather than expressive display styling."
+    ],
+    "rules": [
+      { "name": "The One Blue Voice Rule", "body": "Blue communicates action, selection, or linked structure; do not introduce competing accent hues.", "section": "colors" },
+      { "name": "The Evidence Amber Rule", "body": "Amber is reserved for review and certification caveats, never routine decoration.", "section": "colors" },
+      { "name": "The Literal Material Rule", "body": "Use monospace for commands, code, identifiers, and version literals, not as a decorative brand font.", "section": "typography" },
+      { "name": "The Reading Measure Rule", "body": "Do not widen prose beyond 70ch to fill available space; the surrounding rails may grow or disappear instead.", "section": "layout" },
+      { "name": "The Flat-by-Default Rule", "body": "Persistent reading and navigation surfaces use tone and rules; shadows belong only to transient layers.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do preserve the white reading sheet, mineral frame, cool rules, and single blue interaction family.",
+      "Do keep release caveats in the persistent amber review strip and retain their exact meaning.",
+      "Do keep long-form prose at 70ch or less and preserve the desktop-to-drawer responsive model.",
+      "Do provide visible focus, reduced-motion behavior, keyboard-operable overflow, and semantic interaction states."
+    ],
+    "donts": [
+      "Don't add marketing hero treatments, ornamental illustration, gradients, or competing accent colors.",
+      "Don't turn the amber review state into a decorative badge or imply production certification.",
+      "Don't add shadows to persistent cards, navigation, code, or reading surfaces.",
+      "Don't move canonical content or behavior into the stylesheet; content stays in `docs/`, structure in `site/build.mjs`, and interaction in `site/src/site.js`."
+    ]
+  }
+}

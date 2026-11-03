@@ -46,6 +46,18 @@ The initial HTTP method families are `types`, `records`, `operations`, `flows`, 
 
 Start with the [API usage guide](docs/api-usage.md), [reference definitions](docs/examples/README.md), and [full normative specification](docs/specification-1.0.0.md).
 
+## Documentation site
+
+The static documentation site compiles the canonical files under `docs/` with Markdoc:
+
+```sh
+cd site
+npm ci
+npm run dev
+```
+
+`npm run build` writes the production site to `site/dist`. The GitHub Pages workflow publishes the same static build from `main`; local development remains available at `http://127.0.0.1:4173`.
+
 ## Operator commands
 
 ```sh
@@ -85,5 +97,6 @@ Each distribution includes sample definitions, API usage, dependency notices and
 | `tests/Bos.Conformance` | Unit, adapter and integrated conformance scenarios |
 | `tests/Bos.CrashProbe` | Separate-process crash fixture, excluded from distribution |
 | `tools/Bos.OpenApiGenerator` | Build-time export of the same HTTP schemas |
+| `site` | Markdoc static documentation compiler and browser shell |
 
 No automatic business retries, background execution, arbitrary code, network effects or multitenancy are enabled in this contract.

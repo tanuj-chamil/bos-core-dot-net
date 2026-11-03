@@ -215,6 +215,6 @@ bos serve --data-dir /srv/bos-data
 The certificate must contain its private key. The host loads it with an ephemeral key set rather than installing private keys in the machine/user certificate store. An explicit certificate configuration that cannot be loaded fails startup with a generic diagnostic; it does not silently substitute a development certificate. Stop the host, replace the protected files, then restart to apply certificate renewal or passphrase changes.
 
 If `https` is omitted, ASP.NET Core's normal development-certificate fallback remains available for local development. A clean deployment should use the explicit configuration above. Non-loopback plaintext HTTP remains rejected, and forwarded/proxy headers are not implicitly trusted.
-# Native extraction for self-contained distributions
+## Native extraction for self-contained distributions
 
 Single-file distributions include the SQLite native library. The extraction directory must be owner-only **and on an executable filesystem**. A `noexec` temporary mount prevents loading native libraries even though `bos version` can still run. Set `DOTNET_BUNDLE_EXTRACT_BASE_DIR` to a protected directory on an executable local volume when the default location is unsuitable; do not share it with untrusted users.

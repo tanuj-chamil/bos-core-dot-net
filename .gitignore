@@ -11,3 +11,6 @@ bos-data/
 *.db-wal
 *.db-shm
 .vs/
+site/node_modules/
+site/dist/
+.impeccable/review/
