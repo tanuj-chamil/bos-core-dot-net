@@ -8,15 +8,15 @@ web
 
 ## Stack
 
-Delegated: compile the canonical Markdown documentation with Markdoc into a static site that GitHub Pages can host without a server runtime.
+Delegated: compile curated public Markdown documentation with Markdoc into a static site that GitHub Pages can host without a server runtime.
 
 ## Users
 
-Primary users are BOS Core operators and API integrators preparing, securing, exercising, and recovering a single-tenant deployment. Maintainers and release reviewers are a secondary audience for architecture and conformance evidence.
+Primary users are developers and operators evaluating, integrating, securing, and recovering a single-tenant BOS Core deployment.
 
 ## Product Purpose
 
-BOS Core is a single-tenant .NET business API with SQLite-backed records, identity, typed operations, and atomic YAML flows. The documentation site should let a technical reader move from first deployment to authenticated API use and routine operations without losing access to specification and release evidence.
+BOS Core is a single-tenant .NET business API with SQLite-backed records, identity, typed operations, and atomic YAML flows. The documentation site should let a technical reader move from local evaluation to authenticated API use, business workflows, secure deployment, and routine recovery.
 
 ## Positioning
 
@@ -24,14 +24,15 @@ BOS Core keeps business data, authorization, idempotent operations, and determin
 
 ## Operating Context
 
-Readers work from a terminal, an HTTPS deployment, JSON and YAML definitions, HTTP clients, and offline backup or recovery procedures. Existing files under `docs/` are the canonical source and remain useful outside the website.
+Readers work from a terminal, an HTTPS deployment, JSON and YAML definitions, HTTP clients, and offline backup or recovery procedures. Public website content lives under `site/content/`; internal architecture, acceptance, provenance, and release-engineering records remain under `docs/` and are not website navigation.
 
 ## Capabilities and Constraints
 
-- The site must render existing canonical documentation through Markdoc.
+- The site must render curated public documentation through Markdoc.
 - The output must be static and deployable through GitHub Pages CI.
 - Commands, contracts, security warnings, and review-build caveats must remain precise.
 - The site must work on desktop and mobile and remain keyboard accessible.
+- Internal architecture, decisions, acceptance tracking, dependency inventories, implementation plans, and build reports must not be published as product documentation.
 
 ## Brand Commitments
 
@@ -39,14 +40,14 @@ Use the name BOS Core and its existing direct, technical, evidence-led voice. Do
 
 ## Evidence on Hand
 
-The repository contains the product specification, architecture, usage guide, examples, decisions, implementation contracts, acceptance matrix, dependency inventory, build report, and measured build manifest under `docs/`. No customer claims, testimonials, or external performance benchmarks are available and none should be fabricated.
+The repository contains implementation evidence under `docs/` and public example definitions under `docs/examples/`. Public guidance must be based on verified product behavior without exposing internal release records as navigation. No customer claims, testimonials, or external performance benchmarks are available and none should be fabricated.
 
 ## Product Principles
 
 - Lead with the operator's next concrete action.
-- Keep canonical documentation readable in and out of the site.
+- Keep public source pages readable in and out of the site.
 - Make security boundaries and release caveats conspicuous.
-- Separate practical guidance from specification and evidence without hiding either.
+- Keep internal engineering evidence in the repository without presenting it as end-user documentation.
 - Prefer a small, inspectable static toolchain.
 
 ## Accessibility & Inclusion

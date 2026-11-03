@@ -1,6 +1,6 @@
 # BOS Core documentation site
 
-The site compiles the canonical Markdown files under `../docs/` with [Markdoc](https://markdoc.dev/) and emits static HTML.
+The site compiles curated public Markdown files under `content/` with [Markdoc](https://markdoc.dev/) and emits static HTML. Internal engineering records under `../docs/` are not added to website navigation; selected public examples from `../docs/examples/` are copied as downloadable assets.
 
 ```sh
 cd site

@@ -11,18 +11,16 @@ const siteUrl = (process.env.DOCS_SITE_URL || 'https://tanuj-chamil.github.io/bo
 const repositoryUrl = 'https://github.com/tanuj-chamil/bos-core-dot-net';
 
 const pages = [
-  page('docs/README.md', '', 'Overview', 'Start here', 'What BOS Core is, what is implemented, and where to go next.'),
-  page('docs/api-usage.md', 'guides/api-usage', 'API and operator usage', 'Start here', 'Initialize a workspace, authenticate clients, call methods, and operate a deployment.'),
-  page('docs/examples/README.md', 'guides/examples', 'Reference application', 'Start here', 'Publish and exercise the Material Request schemas, flow, input, and role fixtures.'),
-  page('docs/architecture.md', 'concepts/architecture', 'Architecture and invariants', 'Core concepts', 'Understand module ownership, trust boundaries, transaction scope, and durable state.'),
-  page('docs/implementation-contracts.md', 'concepts/contracts', 'Implementation contracts', 'Core concepts', 'Review the C# ports and conventions that bind the implementation layers.'),
-  page('docs/decisions.md', 'concepts/decisions', 'Decision register', 'Core concepts', 'See frozen product decisions, verified implementation choices, and remaining ambiguities.'),
-  page('docs/specification-1.0.0.md', 'reference/specification', 'Specification 1.0.0', 'Reference', 'The normative BOS Core 1.0.0 product specification.'),
-  page('docs/dependencies.md', 'reference/dependencies', 'Dependency inventory', 'Reference', 'Locked runtime and test dependencies, licenses, and audit commands.'),
-  page('docs/acceptance.md', 'evidence/acceptance', 'Acceptance tracker', 'Release evidence', 'A01–A24 obligations, evidence expectations, and current verification status.'),
-  page('docs/build-report.md', 'evidence/build-report', 'Build report', 'Release evidence', 'Measured implementation, test, artifact, and release-gate evidence.'),
-  page('docs/implementation-plan.md', 'evidence/implementation-plan', 'Implementation plan', 'Release evidence', 'The documentation-first build sequence, ownership, and integration checkpoints.'),
-  page('docs/release-report-template.md', 'evidence/release-report', 'Release report template', 'Release evidence', 'The evidence structure required for a release decision.')
+  page('site/content/index.md', '', 'Overview', 'Start', 'Build single-tenant business applications with versioned records, operations, and YAML workflows.'),
+  page('site/content/quickstart.md', 'quickstart', 'Quickstart', 'Start', 'Initialize BOS Core, sign in securely, and make your first API request.'),
+  page('site/content/api.md', 'guides/api', 'API conventions', 'Build', 'Call BOS methods, handle errors, use idempotency keys, and discover available contracts.'),
+  page('site/content/authentication.md', 'guides/authentication', 'Authentication', 'Build', 'Authenticate browser users and service clients without exposing credentials.'),
+  page('site/content/records.md', 'guides/records', 'Types and records', 'Build', 'Publish versioned data definitions and safely create, query, update, and delete records.'),
+  page('site/content/workflows.md', 'guides/workflows', 'Workflow engine', 'Build', 'Compose registered operations into bounded, atomic YAML workflows.'),
+  page('site/content/material-request.md', 'tutorials/material-request', 'Material Request tutorial', 'Tutorial', 'Publish and exercise the included Material Request schemas and submission workflow.'),
+  page('site/content/deployment.md', 'operations/deployment', 'Secure deployment', 'Operate', 'Configure HTTPS, listeners, origins, protected files, and native extraction.'),
+  page('site/content/backup.md', 'operations/backup', 'Backup and recovery', 'Operate', 'Create verified offline backups, restore safely, and recover administrator access.'),
+  page('site/content/cli.md', 'reference/cli', 'CLI reference', 'Reference', 'Use the supported BOS Core operator commands and understand their exit status.')
 ];
 
 const sourceToRoute = new Map(pages.map((item) => [item.source, item.route]));
@@ -235,9 +233,9 @@ function renderTableOfContents(headings) {
 
 function renderQuickPath() {
   return `<nav class="quick-path" aria-label="Quick paths">
-    <a href="${withBase('guides/api-usage')}#initialize-and-run"><strong>Run locally</strong><span>Initialize and serve</span></a>
-    <a href="${withBase('guides/api-usage')}#method-requests-and-discovery"><strong>Call the API</strong><span>Discover methods</span></a>
-    <a href="${withBase('guides/api-usage')}#offline-backup-restore-and-administrator-recovery"><strong>Operate safely</strong><span>Backup and recover</span></a>
+    <a href="${withBase('quickstart')}"><strong>Get started</strong><span>Run BOS Core locally</span></a>
+    <a href="${withBase('guides/api')}"><strong>Call the API</strong><span>Requests and responses</span></a>
+    <a href="${withBase('guides/workflows')}"><strong>Build a workflow</strong><span>Compose operations safely</span></a>
   </nav>`;
 }
 
@@ -278,7 +276,7 @@ function documentShell({ title, description, route, body, includeSearch }) {
       <a class="github-link" href="${repositoryUrl}" aria-label="BOS Core on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.7a9.6 9.6 0 0 0-3 18.7c.5.1.7-.2.7-.5v-1.9c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.7.1-.7.1-.7 1 .1 1.6 1 1.6 1 .9 1.6 2.4 1.1 2.9.9.1-.7.4-1.1.7-1.4-2.2-.3-4.6-1.1-4.6-4.8 0-1.1.4-2 1-2.6-.1-.3-.4-1.3.1-2.6 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.3.2 2.3.1 2.6.6.7 1 1.5 1 2.6 0 3.7-2.3 4.5-4.6 4.8.4.3.7.9.7 1.7v2.6c0 .4.2.6.7.5A9.6 9.6 0 0 0 12 2.7Z"/></svg></a>
     </div>
   </header>
-  <div class="status-strip" role="note"><span>1.0.0-preview.1</span><strong>Review build</strong><span>Release certification incomplete</span></div>
+  <div class="status-strip" role="note"><span>1.0.0-preview.1</span><strong>Preview</strong><span>APIs may change before 1.0</span></div>
   ${body}
   ${includeSearch ? renderSearchDialog() : ''}
   <script>window.__BOS_DOCS_BASE__ = ${JSON.stringify(basePath)};</script>

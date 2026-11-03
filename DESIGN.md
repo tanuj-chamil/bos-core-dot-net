@@ -120,7 +120,7 @@ components:
 
 BOS Core is a restrained technical reading system: a light mineral frame, a white document sheet, cool rules, ink text, one blue action family, and an amber review warning. It favors orientation, legibility, and evidence over marketing gestures or decorative spectacle.
 
-The interface is compact around navigation and generous in the reading column. Its hierarchy comes from weight, measure, rules, and tonal surfaces rather than illustration or heavy elevation. `docs/` remains the canonical content source; `site/build.mjs` owns semantic structure, `site/src/styles.css` owns this visual system, and `site/src/site.js` owns only navigation, search, copy, and table-of-contents behavior.
+The interface is compact around navigation and generous in the reading column. Its hierarchy comes from weight, measure, rules, and tonal surfaces rather than illustration or heavy elevation. Public content lives in `site/content/`; `site/build.mjs` owns semantic structure, `site/src/styles.css` owns this visual system, and `site/src/site.js` owns only navigation, search, copy, and table-of-contents behavior.
 
 **Key Characteristics:**
 - Flat, cool-toned documentation surfaces with a single blue interaction family.
@@ -234,4 +234,4 @@ Corners are gently compact, not pill-shaped. Inline code and keycaps use the sma
 - **Don't** add marketing hero treatments, ornamental illustration, gradients, or competing accent colors.
 - **Don't** turn the amber review state into a decorative badge or imply production certification.
 - **Don't** add shadows to persistent cards, navigation, code, or reading surfaces.
-- **Don't** move canonical content or behavior into the stylesheet; content stays in `docs/`, structure in `site/build.mjs`, and interaction in `site/src/site.js`.
+- **Don't** move public content or behavior into the stylesheet; content stays in `site/content/`, structure in `site/build.mjs`, and interaction in `site/src/site.js`.

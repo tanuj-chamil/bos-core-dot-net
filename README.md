@@ -44,11 +44,11 @@ All business calls use JSON argument objects and the common result/error envelop
 
 The initial HTTP method families are `types`, `records`, `operations`, `flows`, `identity`, `authorization`, `users`, `roles`, `tokens`, `audit` and `system`. `system.getCapabilities` and authenticated OpenAPI expose the caller-visible implemented contracts. Reserved methods return `FEATURE_NOT_AVAILABLE` and are absent from enabled discovery.
 
-Start with the [API usage guide](docs/api-usage.md), [reference definitions](docs/examples/README.md), and [full normative specification](docs/specification-1.0.0.md).
+Start with the [public documentation](https://tanuj-chamil.github.io/bos-core-dot-net/), [reference definitions](docs/examples/README.md), and [full normative specification](docs/specification-1.0.0.md).
 
 ## Documentation site
 
-The static documentation site compiles the canonical files under `docs/` with Markdoc:
+The static documentation site compiles curated public guides under `site/content/` with Markdoc. Internal architecture, acceptance, provenance, and release-engineering records under `docs/` remain repository references and are not published as website navigation:
 
 ```sh
 cd site
